@@ -1,0 +1,9 @@
+[package]
+name = "jigsaw-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = { version = "0.8.5", features = ["std", "std_rng"] }
+rusqlite = "0.32.1"
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread", "net", "io-util", "sync", "time"] }
