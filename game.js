@@ -152,6 +152,34 @@ window.addEventListener('load', function () {
 		element;
 		nibTypes;
 		connectedComponent;
+		getClipPath() {
+			const nibTypes = this.nibTypes;
+			let shoulderWidth = (pieceWidth - nibSize) / 2;
+			let shoulderHeight = (pieceHeight - nibSize) / 2;
+			let clipPath = [];
+			clipPath.push(`M${nibSize} ${nibSize}`);
+			clipPath.push(`l${shoulderWidth} 0`);
+			if (nibTypes[0]) {
+				clipPath.push(nibTypes[0].path());
+			}
+			clipPath.push(`L${pieceWidth + nibSize} ${nibSize}`);
+			clipPath.push(`l0 ${shoulderHeight}`);
+			if (nibTypes[1]) {
+				clipPath.push(nibTypes[1].path());
+			}
+			clipPath.push(`L${pieceWidth + nibSize} ${pieceHeight + nibSize}`);
+			clipPath.push(`l-${shoulderWidth} 0`);
+			if (nibTypes[2]) {
+				clipPath.push(nibTypes[2].path());
+			}
+			clipPath.push(`L${nibSize} ${pieceHeight + nibSize}`);
+			clipPath.push(`l0 -${shoulderHeight}`);
+			if (nibTypes[3]) {
+				clipPath.push(nibTypes[3].path());
+			}
+			clipPath.push(`L${nibSize} ${nibSize}`);
+			return clipPath.join(' ');
+		}
 		constructor(id, u, v, x, y, nibTypes) {
 			this.id = id;
 			this.x = x;
@@ -172,52 +200,18 @@ window.addEventListener('load', function () {
 			});
 			this.updateUV();
 			this.updatePosition();
-			let shoulderWidth = (pieceWidth - nibSize) / 2;
-			let shoulderHeight = (pieceHeight - nibSize) / 2;
 			const debugCurves = false;//display bezier control points for debugging
 			if (debugCurves)
 				playArea.appendChild(element);
-			const debugPoint = (x, y, color) => {
-				if (debugCurves)
-					debugAddPoint(this.element, x, y, color, this.id);
-			};
-			const debugPath = (path, x0, y0) => {
-				if (!debugCurves) return;
-				path = path.replace(/[cs]/g, '').split(' ').map((x) => parseFloat(x));
-				console.assert(path.length === 10);
-				debugPoint(x0, y0, 'green');
-				debugPoint(x0 + path[0], y0 + path[1], 'blue');
-				debugPoint(x0 + path[2], y0 + path[3], 'cyan');
-				debugPoint(x0 + path[4], y0 + path[5], 'green');
-				// reflected point
-				debugPoint(x0 + 2 * path[4] - path[2], y0 + 2 * path[5] - path[3], 'red');
-				debugPoint(x0 + path[4] + path[6], y0 + path[5] + path[7], 'magenta');
-				debugPoint(x0 + path[4] + path[8], y0 + path[5] + path[9], 'green');
-			};
 			this.nibTypes = nibTypes;
-			let clipPath = [`path("M${nibSize} ${nibSize}`];
-			clipPath.push(`l${shoulderWidth} 0`);
-			if (nibTypes[0]) {
-				debugPath(nibTypes[0].path(), nibSize + shoulderWidth, nibSize);
-				clipPath.push(nibTypes[0].path());
-			}
-			clipPath.push(`L${pieceWidth + nibSize} ${nibSize}`);
-			clipPath.push(`l0 ${shoulderHeight}`);
-			if (nibTypes[1]) {
-				debugPath(nibTypes[1].path(), pieceWidth + nibSize, nibSize + shoulderHeight);
-				clipPath.push(nibTypes[1].path());
-			}
-			clipPath.push(`L${pieceWidth + nibSize} ${pieceHeight + nibSize}`);
-			clipPath.push(`l-${shoulderWidth} 0`);
-			if (nibTypes[2]) {
-				debugPath(nibTypes[2].path(), pieceWidth + nibSize - shoulderWidth, pieceHeight + nibSize);
-				clipPath.push(nibTypes[2].path());
-			}
-			clipPath.push(`L${nibSize} ${pieceHeight + nibSize}`);
-			clipPath.push(`l0 -${shoulderHeight}`);
-			if (nibTypes[3]) clipPath.push(nibTypes[3].path());
-			clipPath.push(`L${nibSize} ${nibSize}`);
-			this.element.style.clipPath = clipPath.join(' ');
+			const clipPath = this.getClipPath();
+			this.element.style.clipPath = `path("${clipPath}")`;
+			const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+			svg.setAttribute('width', pieceWidth + 2 * nibSize);
+			svg.setAttribute('height', pieceHeight + 2 * nibSize);
+			svg.setAttribute('viewBox', `0 0 ${pieceWidth + 2 * nibSize} ${pieceHeight + 2 * nibSize}`);
+			svg.innerHTML = `<path d="${clipPath}" stroke-width="1" stroke="black" fill="none" />`;
+			this.element.appendChild(svg);
 			if (!debugCurves)
 				playArea.appendChild(element);
 		}
@@ -290,8 +284,9 @@ window.addEventListener('load', function () {
 	
 	image.addEventListener('load', function () {
 		pieceHeight = pieceWidth * puzzleWidth * image.height / (puzzleHeight * image.width);
-		document.body.style.setProperty('--piece-width', (pieceWidth + 2 * nibSize) + 'px');
-		document.body.style.setProperty('--piece-height', (pieceHeight + 2 * nibSize) + 'px');
+		document.body.style.setProperty('--piece-width', (pieceWidth) + 'px');
+		document.body.style.setProperty('--piece-height', (pieceHeight) + 'px');
+		document.body.style.setProperty('--nib-size', (nibSize) + 'px');
 		document.body.style.setProperty('--image-width', (pieceWidth * puzzleWidth) + 'px');
 		document.body.style.setProperty('--image-height', (pieceHeight * puzzleHeight) + 'px');
 		let positions = [];

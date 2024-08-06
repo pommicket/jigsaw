@@ -19,11 +19,12 @@ body {
 
 .piece {
 	position: absolute;
-	width: var(--piece-width);
-	height: var(--piece-height);
+	width: calc(var(--piece-width) + 2 * var(--nib-size));
+	height: calc(var(--piece-height) + 2 * var(--nib-size));
 	background-image: var(--image);
 	background-size: var(--image-width) var(--image-height);
 }
+
 .debug-point {
 	position: absolute;
 	width: 1px;
