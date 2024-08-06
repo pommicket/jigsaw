@@ -2,12 +2,15 @@
 window.addEventListener('load', function () {
 	const getById = (id) => document.getElementById(id);
 	const playArea = getById("play-area");
+	const connectAudio = getById("connect-audio");
+	const solveAudio = getById("solve-audio");
+	let solved = false;
 	const connectRadius = 5;
 	let pieceZIndexCounter = 1;
 	let draggingPiece = null;
 	let nibSize = 12;
-	let puzzleWidth = 8;
-	let puzzleHeight = 5;
+	let puzzleWidth = 4;
+	let puzzleHeight = 3;
 	let imageUrl = "https://upload.wikimedia.org/wikipedia/commons/0/09/Croatia_Opatija_Maiden_with_the_Seagull_BW_2014-10-10_10-35-13.jpg";
 	let pieceWidth = 70;
 	let pieceHeight;
@@ -219,8 +222,8 @@ window.addEventListener('load', function () {
 				playArea.appendChild(element);
 		}
 		updateUV() {
-			this.element.style.backgroundPositionX = (-this.u) + 'px';
-			this.element.style.backgroundPositionY = (-this.v) + 'px';
+			this.element.style.backgroundPositionX = (nibSize - this.u) + 'px';
+			this.element.style.backgroundPositionY = (nibSize - this.v) + 'px';
 		}
 		updatePosition() {
 			this.element.style.left = this.x + 'px';
@@ -229,7 +232,9 @@ window.addEventListener('load', function () {
 	}
 	window.addEventListener('mouseup', function() {
 		if (draggingPiece) {
+			let anyConnected = false;
 			for (const piece of draggingPiece.connectedComponent) {
+				if (solved) break;
 				const col = piece.id % puzzleWidth;
 				const row = Math.floor(piece.id / puzzleWidth);
 				const bbox = piece.element.getBoundingClientRect();
@@ -254,12 +259,19 @@ window.addEventListener('load', function () {
 							piece2.y -= diff[1];
 							piece2.updatePosition();
 						}
+						anyConnected = true;
 						connectPieces(piece, neighbour);
 					}
 				}
 			}
+			if (!solved && draggingPiece.connectedComponent.length === puzzleWidth * puzzleHeight) {
+				solveAudio.play();
+				solved = true;
+			}
 			draggingPiece.element.style.removeProperty('cursor');
 			draggingPiece = null;
+			if (anyConnected)
+				connectAudio.play();
 		}
 	});
 	window.addEventListener('mousemove', function(e) {
@@ -277,17 +289,18 @@ window.addEventListener('load', function () {
 	});
 	
 	image.addEventListener('load', function () {
-//		(pieceHeight * puzzleHeight) / (pieceWidth * puzzleWidth) === image.height / image.width;
 		pieceHeight = pieceWidth * puzzleWidth * image.height / (puzzleHeight * image.width);
 		document.body.style.setProperty('--piece-width', (pieceWidth + 2 * nibSize) + 'px');
 		document.body.style.setProperty('--piece-height', (pieceHeight + 2 * nibSize) + 'px');
+		document.body.style.setProperty('--image-width', (pieceWidth * puzzleWidth) + 'px');
+		document.body.style.setProperty('--image-height', (pieceHeight * puzzleHeight) + 'px');
 		let positions = [];
 		for (let y = 0; y < puzzleHeight; y++) {
 			for (let x = 0; x < puzzleWidth; x++) {
 				positions.push([x, y, Math.random()]);
 			}
 		}
-		positions.sort((x, y) => x[2] - y[2]);
+		//positions.sort((x, y) => x[2] - y[2]); // shuffle pieces
 		for (let y = 0; y < puzzleHeight; y++) {
 			for (let x = 0; x < puzzleWidth; x++) {
 				let nibTypes = [null, null, null, null];
