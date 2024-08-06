@@ -6,7 +6,14 @@ window.addEventListener('load', function () {
 	let pieceZIndexCounter = 1;
 	let draggingPiece = null;
 	let nibSize = 12;
-	let pieceSize = 70 - 2 * nibSize;
+	let puzzleWidth = 8;
+	let puzzleHeight = 5;
+	let imageUrl = "https://upload.wikimedia.org/wikipedia/commons/0/09/Croatia_Opatija_Maiden_with_the_Seagull_BW_2014-10-10_10-35-13.jpg";
+	let pieceWidth = 70;
+	let pieceHeight;
+	document.body.style.setProperty('--image', `url("${imageUrl}")`);// TODO : escaping
+	const image = new Image();
+	image.src = imageUrl;
 	const draggingPieceLastPos = Object.preventExtensions({x: null, y: null});
 	var randomSeed = 123456789;
 	function debugAddPoint(element, x, y, color, id) {
@@ -162,7 +169,8 @@ window.addEventListener('load', function () {
 			});
 			this.updateUV();
 			this.updatePosition();
-			let shoulderWidth = (pieceSize - nibSize) / 2;
+			let shoulderWidth = (pieceWidth - nibSize) / 2;
+			let shoulderHeight = (pieceHeight - nibSize) / 2;
 			const debugCurves = false;//display bezier control points for debugging
 			if (debugCurves)
 				playArea.appendChild(element);
@@ -190,20 +198,20 @@ window.addEventListener('load', function () {
 				debugPath(nibTypes[0].path(), nibSize + shoulderWidth, nibSize);
 				clipPath.push(nibTypes[0].path());
 			}
-			clipPath.push(`L${pieceSize + nibSize} ${nibSize}`);
-			clipPath.push(`l0 ${shoulderWidth}`);
+			clipPath.push(`L${pieceWidth + nibSize} ${nibSize}`);
+			clipPath.push(`l0 ${shoulderHeight}`);
 			if (nibTypes[1]) {
-				debugPath(nibTypes[1].path(), pieceSize + nibSize, nibSize + shoulderWidth);
+				debugPath(nibTypes[1].path(), pieceWidth + nibSize, nibSize + shoulderHeight);
 				clipPath.push(nibTypes[1].path());
 			}
-			clipPath.push(`L${pieceSize + nibSize} ${pieceSize + nibSize}`);
+			clipPath.push(`L${pieceWidth + nibSize} ${pieceHeight + nibSize}`);
 			clipPath.push(`l-${shoulderWidth} 0`);
 			if (nibTypes[2]) {
-				debugPath(nibTypes[2].path(), pieceSize + nibSize - shoulderWidth, pieceSize + nibSize);
+				debugPath(nibTypes[2].path(), pieceWidth + nibSize - shoulderWidth, pieceHeight + nibSize);
 				clipPath.push(nibTypes[2].path());
 			}
-			clipPath.push(`L${nibSize} ${pieceSize + nibSize}`);
-			clipPath.push(`l0 -${shoulderWidth}`);
+			clipPath.push(`L${nibSize} ${pieceHeight + nibSize}`);
+			clipPath.push(`l0 -${shoulderHeight}`);
 			if (nibTypes[3]) clipPath.push(nibTypes[3].path());
 			clipPath.push(`L${nibSize} ${nibSize}`);
 			this.element.style.clipPath = clipPath.join(' ');
@@ -267,17 +275,29 @@ window.addEventListener('load', function () {
 			draggingPieceLastPos.y = e.clientY;
 		}
 	});
-	let puzzleWidth = 19;
-	let puzzleHeight = 12;
-	for (let y = 0; y < puzzleHeight; y++) {
-		for (let x = 0; x < puzzleWidth; x++) {
-			let nibTypes = [null, null, null, null];
-			let id = pieces.length;
-			if (y > 0) nibTypes[0] = pieces[id - puzzleWidth].nibTypes[2].inverse();
-			if (x < puzzleWidth - 1) nibTypes[1] = NibType.random(Math.floor(random() * 2) ? RIGHT_IN : RIGHT_OUT);
-			if (y < puzzleHeight - 1) nibTypes[2] = NibType.random(Math.floor(random() * 2) ? BOTTOM_IN : BOTTOM_OUT);
-			if (x > 0) nibTypes[3] = pieces[id - 1].nibTypes[1].inverse();
-			pieces.push(new Piece(id, x * pieceSize, y * pieceSize, x * 70, y * 70, nibTypes));
+	
+	image.addEventListener('load', function () {
+//		(pieceHeight * puzzleHeight) / (pieceWidth * puzzleWidth) === image.height / image.width;
+		pieceHeight = pieceWidth * puzzleWidth * image.height / (puzzleHeight * image.width);
+		document.body.style.setProperty('--piece-width', (pieceWidth + 2 * nibSize) + 'px');
+		document.body.style.setProperty('--piece-height', (pieceHeight + 2 * nibSize) + 'px');
+		let positions = [];
+		for (let y = 0; y < puzzleHeight; y++) {
+			for (let x = 0; x < puzzleWidth; x++) {
+				positions.push([x, y, Math.random()]);
+			}
 		}
-	}
+		positions.sort((x, y) => x[2] - y[2]);
+		for (let y = 0; y < puzzleHeight; y++) {
+			for (let x = 0; x < puzzleWidth; x++) {
+				let nibTypes = [null, null, null, null];
+				let id = pieces.length;
+				if (y > 0) nibTypes[0] = pieces[id - puzzleWidth].nibTypes[2].inverse();
+				if (x < puzzleWidth - 1) nibTypes[1] = NibType.random(Math.floor(random() * 2) ? RIGHT_IN : RIGHT_OUT);
+				if (y < puzzleHeight - 1) nibTypes[2] = NibType.random(Math.floor(random() * 2) ? BOTTOM_IN : BOTTOM_OUT);
+				if (x > 0) nibTypes[3] = pieces[id - 1].nibTypes[1].inverse();
+				pieces.push(new Piece(id, x * pieceWidth, y * pieceHeight, positions[id][0] * 80, positions[id][1] * 80, nibTypes));
+			}
+		}
+	});
 });

@@ -1,8 +1,9 @@
 body {
 	font-family: sans-serif;
-	--piece-size: 70px;
-	--image: url("https://upload.wikimedia.org/wikipedia/commons/0/09/Croatia_Opatija_Maiden_with_the_Seagull_BW_2014-10-10_10-35-13.jpg");
-	--view-width: 800px;
+	--piece-width: 50px;
+	--piece-height: 50px;
+	--image: url("");
+	--view-width: 640px;
 	--view-height: 480px;
 	margin: 0;
 	position: relative;
@@ -18,8 +19,8 @@ body {
 
 .piece {
 	position: absolute;
-	width: var(--piece-size);
-	height: var(--piece-size);
+	width: var(--piece-width);
+	height: var(--piece-height);
 	background-image: var(--image);
 	background-size: var(--view-width) var(--view-height);
 	/* clip-path: path("M0 0 L40 0 L40 40 L0 40 Z"); */
