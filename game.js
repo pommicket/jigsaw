@@ -1,5 +1,13 @@
 'use strict';
 window.addEventListener('load', function () {
+	const socket = new WebSocket("ws://localhost:3000");
+	socket.binaryType = "arraybuffer";
+	socket.addEventListener('open', (e) => {
+		socket.send('Hello!');
+	});
+	socket.addEventListener('message', (e) => {
+		console.log(e.data);
+	});
 	const getById = (id) => document.getElementById(id);
 	const playArea = getById("play-area");
 	const connectAudio = getById("connect-audio");

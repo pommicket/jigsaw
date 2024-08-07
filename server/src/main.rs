@@ -1,42 +1,26 @@
+use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddr;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::io::Write;
+use tokio::io::AsyncWriteExt;
+use tungstenite::protocol::Message;
 
-async fn handle_request(_request: &[u8]) -> (Vec<u8>, &'static str) {
-//	if let Some(rest) = request.strip_prefix(b"GET /") {
-//	} else if let Some(rest) = request.strip_prefix(b"POST /") {
-//	} else {
-		(b"Bad request".to_vec(), "400 Bad Request")
-//	}
-}
-
-async fn handle_connection(conn: &mut tokio::net::TcpStream) -> Result<(), String> {
-	let mut request = vec![0; 60];
-	let mut request_len = 0;
-	loop {
-		let n = conn.read(&mut request[request_len..]).await.map_err(|e| format!("read error: {e}"))?;
-		if n == 0 {
-			return Err(format!("unexpected EOF"));
+async fn handle_connection(conn: &mut tokio::net::TcpStream) -> anyhow::Result<()> {
+	let mut ws = tokio_tungstenite::accept_async_with_config(
+		conn,
+		Some(tungstenite::protocol::WebSocketConfig {
+			max_message_size: Some(4096),
+			max_frame_size: Some(4096),
+			..Default::default()
+		}),
+	)
+	.await?;
+	while let Some(message) = ws.next().await {
+		let message = message?;
+		if matches!(message, Message::Close(_)) {
+			break;
 		}
-		match request[request_len..request_len + n].windows(2).position(|w| w == b"\r\n") {
-			Some(end) => {
-				request_len += end;
-				break;
-			}
-			None => {
-				request_len += n;
-				if request_len == request.len() {
-					break;
-				}
-			}
-		}
+		println!("{:?}", message);
+		ws.send(message).await?;
 	}
-	let (response_content, status) = handle_request(&request[..request_len]).await;
-	let mut response = vec![];
-	let _ = write!(response, "HTTP/1.1 {status}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n",
-		response_content.len());
-	response.extend_from_slice(&response_content);
-	let _ = conn.write_all(&response).await.map_err(|e| format!("write error: {e}"))?;
 	Ok(())
 }
 
@@ -70,7 +54,6 @@ async fn main() {
 				Ok(()) => {}
 				Err(e) => {
 					eprintln!("Error handling connection to {addr}: {e}");
-					
 				}
 			}
 			let _ = stream.shutdown().await;
