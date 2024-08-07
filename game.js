@@ -2,11 +2,15 @@
 window.addEventListener('load', function () {
 	const socket = new WebSocket("ws://localhost:3000");
 	socket.binaryType = "arraybuffer";
-	socket.addEventListener('open', (e) => {
-		socket.send('Hello!');
+	let imageUrl = "https://upload.wikimedia.org/wikipedia/commons/0/09/Croatia_Opatija_Maiden_with_the_Seagull_BW_2014-10-10_10-35-13.jpg";
+	let puzzleWidth = 4;
+	let puzzleHeight = 3;
+	socket.addEventListener('open', () => {
+		socket.send(`new ${puzzleWidth} ${puzzleHeight} ${imageUrl}`);
 	});
 	socket.addEventListener('message', (e) => {
 		console.log(e.data);
+		setTimeout(() => socket.send('poll'), 1000);
 	});
 	const getById = (id) => document.getElementById(id);
 	const playArea = getById("play-area");
@@ -17,9 +21,6 @@ window.addEventListener('load', function () {
 	let pieceZIndexCounter = 1;
 	let draggingPiece = null;
 	let nibSize = 12;
-	let puzzleWidth = 4;
-	let puzzleHeight = 3;
-	let imageUrl = "https://upload.wikimedia.org/wikipedia/commons/0/09/Croatia_Opatija_Maiden_with_the_Seagull_BW_2014-10-10_10-35-13.jpg";
 	let pieceWidth = 70;
 	let pieceHeight;
 	document.body.style.setProperty('--image', `url("${imageUrl}")`);// TODO : escaping
