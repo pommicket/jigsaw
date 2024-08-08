@@ -5,17 +5,11 @@ window.addEventListener('load', function () {
 	let imageUrl = "https://upload.wikimedia.org/wikipedia/commons/0/09/Croatia_Opatija_Maiden_with_the_Seagull_BW_2014-10-10_10-35-13.jpg";
 	let puzzleWidth = 4;
 	let puzzleHeight = 3;
-	socket.addEventListener('open', () => {
-		socket.send(`new ${puzzleWidth} ${puzzleHeight} ${imageUrl}`);
-	});
-	socket.addEventListener('message', (e) => {
-		console.log(e.data);
-		setTimeout(() => socket.send('poll'), 1000);
-	});
 	const getById = (id) => document.getElementById(id);
 	const playArea = getById("play-area");
 	const connectAudio = getById("connect-audio");
 	const solveAudio = getById("solve-audio");
+	const joinPuzzle = new URL(location).searchParams.get('join');
 	let solved = false;
 	const connectRadius = 5;
 	let pieceZIndexCounter = 1;
@@ -25,21 +19,36 @@ window.addEventListener('load', function () {
 	let pieceHeight;
 	document.body.style.setProperty('--image', `url("${imageUrl}")`);// TODO : escaping
 	const image = new Image();
-	image.src = imageUrl;
 	const draggingPieceLastPos = Object.preventExtensions({x: null, y: null});
-	var randomSeed = 123456789;
+	let randomSeed = 123456789;
+	function setRandomSeed(to) {
+		randomSeed = to;
+		// randomize a little
+		random();
+		random();
+	}
 	function debugAddPoint(element, x, y, color, id) {
 		if (!color) color = 'red';
 		const point = document.createElement('div');
 		point.classList.add('debug-point');
-		console.log(element.getBoundingClientRect().left);
 		point.style.left = (x + element.getBoundingClientRect().left) + 'px';
 		point.style.top = (y + element.getBoundingClientRect().top) + 'px';
 		point.style.backgroundColor = color;
 		if (id !== undefined) point.dataset.id = id;
 		document.body.appendChild(point);
 	}
-	
+	function canonicalToScreenPos(canonical) {
+		return {
+			x: canonical.x * (playArea.clientWidth - pieceWidth - 2 * nibSize),
+			y: canonical.y  * (playArea.clientHeight - pieceHeight - 2 * nibSize),
+		};
+	}
+	function screenPosToCanonical(scr) {
+		return {
+			x: scr.x / (playArea.clientWidth - pieceWidth - 2 * nibSize),
+			y: scr.y / (playArea.clientHeight - pieceHeight - 2 * nibSize),
+		};
+	}
 	function random() {
 		// https://en.wikipedia.org/wiki/Linear_congruential_generator
 		// this uses the "Microsoft Visual/Quick C/C++" constants because
@@ -75,8 +84,15 @@ window.addEventListener('load', function () {
 	function connectPieces(piece1, piece2) {
 		if (piece1.connectedComponent === piece2.connectedComponent) return;
 		piece1.connectedComponent.push(...piece2.connectedComponent);
+		let piece1Col = piece1.col();
+		let piece1Row = piece1.row();
 		for (const piece of piece2.connectedComponent) {
 			piece.connectedComponent = piece1.connectedComponent;
+			const row = piece.row();
+			const col = piece.col();
+			piece.x = (col - piece1Col) * pieceWidth + piece1.x;
+			piece.y = (row - piece1Row) * pieceHeight + piece1.y;
+			piece.updatePosition();
 		}
 	}
 	class NibType {
@@ -228,19 +244,35 @@ window.addEventListener('load', function () {
 			this.element.style.backgroundPositionX = (nibSize - this.u) + 'px';
 			this.element.style.backgroundPositionY = (nibSize - this.v) + 'px';
 		}
+		col() {
+			return this.id % puzzleWidth;
+		}
+		row() {
+			return Math.floor(this.id / puzzleWidth);
+		}
 		updatePosition() {
 			this.element.style.left = this.x + 'px';
 			this.element.style.top = this.y + 'px';
+		}
+		boundingBox() {
+			return Object.preventExtensions({
+				left: this.x, top: this.y, right: this.x + pieceWidth + 2 * nibSize, bottom: this.y + pieceHeight + 2 * nibSize
+			});
 		}
 	}
 	window.addEventListener('mouseup', function() {
 		if (draggingPiece) {
 			let anyConnected = false;
 			for (const piece of draggingPiece.connectedComponent) {
+				const canonicalPos = screenPosToCanonical({
+					x: piece.x,
+					y: piece.y,
+				});
+				socket.send(`move ${piece.id} ${canonicalPos.x} ${canonicalPos.y}`);
 				if (solved) break;
-				const col = piece.id % puzzleWidth;
-				const row = Math.floor(piece.id / puzzleWidth);
-				const bbox = piece.element.getBoundingClientRect();
+				const col = piece.col();
+				const row = piece.row();
+				const bbox = piece.boundingBox();
 				for (const [nx, ny] of [[0, -1], [0, 1], [1, 0], [-1, 0]]) {
 					if (col + nx < 0 || col + nx >= puzzleWidth
 						|| row + ny < 0 || row + ny >= puzzleHeight) {
@@ -249,7 +281,7 @@ window.addEventListener('load', function () {
 					let neighbour = pieces[piece.id + nx + ny * puzzleWidth];
 					if (neighbour.connectedComponent === piece.connectedComponent)
 						continue;
-					let neighbourBBox = neighbour.element.getBoundingClientRect();
+					let neighbourBBox = neighbour.boundingBox();
 					let keyPointMe = [nx === -1 ? bbox.left + nibSize : bbox.right - nibSize,
 						ny === -1 ? bbox.top + nibSize : bbox.bottom - nibSize];
 					let keyPointNeighbour = [nx === 1 ?  neighbourBBox.left + nibSize : neighbourBBox.right - nibSize,
@@ -257,11 +289,6 @@ window.addEventListener('load', function () {
 					let diff = [keyPointMe[0] - keyPointNeighbour[0], keyPointMe[1] - keyPointNeighbour[1]];
 					let sqDist = diff[0] * diff[0] + diff[1] * diff[1];
 					if (sqDist < connectRadius * connectRadius) {
-						for (const piece2 of piece.connectedComponent) {
-							piece2.x -= diff[0];
-							piece2.y -= diff[1];
-							piece2.updatePosition();
-						}
 						anyConnected = true;
 						connectPieces(piece, neighbour);
 					}
@@ -290,30 +317,123 @@ window.addEventListener('load', function () {
 			draggingPieceLastPos.y = e.clientY;
 		}
 	});
-	
-	image.addEventListener('load', function () {
+	function loadImage() {
+		image.src = imageUrl;
+		return new Promise((resolve) => {
+			image.addEventListener('load', function () {
+				resolve();
+			});
+		});
+	}
+	let imageLoaded = joinPuzzle ? null : loadImage();
+	function updateConnectivity(connectivity) {
+		console.assert(connectivity.length === pieces.length);
+		for (let i = 0; i < pieces.length; i++) {
+			connectPieces(pieces[i], pieces[connectivity[i]]);
+		}
+	}
+	async function initPuzzle(payload) {
+		const data = new Uint8Array(payload, payload.length);
+		if (joinPuzzle) {
+			puzzleWidth = data[8];
+			puzzleHeight = data[9];
+		} else {
+			console.assert(puzzleWidth === data[8]);
+			console.assert(puzzleHeight === data[9]);
+		}
+		const nibTypesOffset = 10;
+		const nibTypeCount = 2 * puzzleWidth * puzzleHeight - puzzleWidth - puzzleHeight;
+		const nibTypes = new Uint16Array(payload, nibTypesOffset, nibTypeCount);
+		const imageUrlOffset = nibTypesOffset + nibTypeCount * 2;
+		const imageUrlLen = new Uint8Array(payload, imageUrlOffset, data.length - imageUrlOffset).indexOf(0);
+		const imageUrlBytes = new Uint8Array(payload, imageUrlOffset, imageUrlLen);
+		let piecePositionsOffset = imageUrlOffset + imageUrlLen;
+		piecePositionsOffset = Math.floor((piecePositionsOffset + 7) / 8) * 8; // align to 8 bytes
+		const piecePositions = new Float32Array(payload, piecePositionsOffset, puzzleWidth * puzzleHeight * 2);
+		const connectivityOffset = piecePositionsOffset + piecePositions.length * 4;
+		const connectivity = new Uint16Array(payload, connectivityOffset, puzzleWidth * puzzleHeight);
+		if (joinPuzzle) {
+			imageUrl = new TextDecoder().decode(imageUrlBytes);
+			await loadImage();
+		} else {
+			await imageLoaded;
+		}
+		let nibTypeIndex = 0;
 		pieceHeight = pieceWidth * puzzleWidth * image.height / (puzzleHeight * image.width);
 		document.body.style.setProperty('--piece-width', (pieceWidth) + 'px');
 		document.body.style.setProperty('--piece-height', (pieceHeight) + 'px');
 		document.body.style.setProperty('--nib-size', (nibSize) + 'px');
 		document.body.style.setProperty('--image-width', (pieceWidth * puzzleWidth) + 'px');
 		document.body.style.setProperty('--image-height', (pieceHeight * puzzleHeight) + 'px');
-		let positions = [];
-		for (let y = 0; y < puzzleHeight; y++) {
-			for (let x = 0; x < puzzleWidth; x++) {
-				positions.push([x, y, Math.random()]);
+		for (let v = 0; v < puzzleHeight; v++) {
+			for (let u = 0; u < puzzleWidth; u++) {
+				let nibs = [null, null, null, null];
+				let id = pieces.length;
+				if (v > 0) nibs[0] = pieces[id - puzzleWidth].nibTypes[2].inverse();
+				if (u < puzzleWidth - 1) {
+					setRandomSeed(nibTypes[nibTypeIndex++]);
+					nibs[1] = NibType.random(Math.floor(random() * 2) ? RIGHT_IN : RIGHT_OUT);
+				}
+				if (v < puzzleHeight - 1) {
+					setRandomSeed(nibTypes[nibTypeIndex++]);
+					nibs[2] = NibType.random(Math.floor(random() * 2) ? BOTTOM_IN : BOTTOM_OUT);
+				}
+				if (u > 0) nibs[3] = pieces[id - 1].nibTypes[1].inverse();
+				pieces.push(new Piece(id, u * pieceWidth, v * pieceHeight, 0, 0, nibs));
 			}
 		}
-		//positions.sort((x, y) => x[2] - y[2]); // shuffle pieces
-		for (let y = 0; y < puzzleHeight; y++) {
-			for (let x = 0; x < puzzleWidth; x++) {
-				let nibTypes = [null, null, null, null];
-				let id = pieces.length;
-				if (y > 0) nibTypes[0] = pieces[id - puzzleWidth].nibTypes[2].inverse();
-				if (x < puzzleWidth - 1) nibTypes[1] = NibType.random(Math.floor(random() * 2) ? RIGHT_IN : RIGHT_OUT);
-				if (y < puzzleHeight - 1) nibTypes[2] = NibType.random(Math.floor(random() * 2) ? BOTTOM_IN : BOTTOM_OUT);
-				if (x > 0) nibTypes[3] = pieces[id - 1].nibTypes[1].inverse();
-				pieces.push(new Piece(id, x * pieceWidth, y * pieceHeight, positions[id][0] * 80, positions[id][1] * 80, nibTypes));
+		console.assert(nibTypeIndex === nibTypeCount);
+		updateConnectivity(connectivity);
+		for (let id = 0; id < pieces.length; id++) {
+			const canonicalPos = {
+				x: piecePositions[2 * connectivity[id]],
+				y: piecePositions[2 * connectivity[id] + 1]
+			};
+			const screenPos = canonicalToScreenPos(canonicalPos);
+			pieces[id].x = screenPos.x + pieceWidth * (pieces[id].col() - pieces[connectivity[id]].col());
+			pieces[id].y = screenPos.y + pieceHeight * (pieces[id].row() - pieces[connectivity[id]].row());
+			pieces[id].updatePosition();
+		}
+	}
+	function applyUpdate(update) {
+		const piecePositions = new Float32Array(update, 8, puzzleWidth * puzzleHeight * 2);
+		const connectivity = new Uint16Array(update, 8 + piecePositions.length * 4, puzzleWidth * puzzleHeight);
+		updateConnectivity(connectivity);
+		for (let i = 0; i < pieces.length; i++) {
+			// only udpate the position of one piece per equivalence class mod is-connected-to
+			if (connectivity[i] !== i) continue;
+			const piece = pieces[i];
+			if (draggingPiece && draggingPiece.connectedComponent === piece.connectedComponent) continue;
+			const newPos = canonicalToScreenPos({x: piecePositions[2*i], y: piecePositions[2*i+1]});
+			const diff = [newPos.x - piece.x, newPos.y - piece.y];
+			const minRadius = 10; // don't bother moving less than 10px
+			if (diff[0] * diff[0] + diff[1] * diff[1] < minRadius * minRadius) continue;
+			piece.x = newPos.x;
+			piece.y = newPos.y;
+			piece.updatePosition();
+		}
+	}
+	
+	socket.addEventListener('open', () => {
+		if (joinPuzzle) {
+			socket.send(`join ${joinPuzzle}`);
+		} else {
+			socket.send(`new ${puzzleWidth} ${puzzleHeight} ${imageUrl}`);
+		}
+		setInterval(() => socket.send('poll'), 1000);
+	});
+	socket.addEventListener('message', (e) => {
+		if (typeof e.data === 'string') {
+			if (e.data.startsWith('id: ')) {
+				let puzzleID = e.data.split(' ')[1];
+				console.log('ID:', puzzleID);
+			}
+		} else {
+			const opcode = new Uint8Array(e.data, 0, 1)[0];
+			if (opcode === 1 && !pieces.length) { // init puzzle
+				initPuzzle(e.data);
+			} else if (opcode === 2) { // update puzzle
+				applyUpdate(e.data);
 			}
 		}
 	});
