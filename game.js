@@ -1,6 +1,6 @@
 'use strict';
 window.addEventListener('load', function () {
-	const socket = new WebSocket("ws://localhost:3000");
+	const socket = new WebSocket(`${location.protocol === "file:" || location.hostname === "localhost" ? "ws://localhost:54472" : "wss://jigsaw.pommicket.com"}`);
 	const searchParams = new URL(location.href).searchParams;
 	socket.binaryType = "arraybuffer";
 	let imageUrl = searchParams.get('image');//"https://upload.wikimedia.org/wikipedia/commons/0/09/Croatia_Opatija_Maiden_with_the_Seagull_BW_2014-10-10_10-35-13.jpg";
@@ -22,7 +22,7 @@ window.addEventListener('load', function () {
 	if (imageUrl.startsWith('http')) {
 		// make sure we use https
 		let url = new URL(imageUrl);
-		url.protocol = 'https';
+		url.protocol = 'https:';
 		imageUrl = url.href;
 	}
 	const image = new Image();

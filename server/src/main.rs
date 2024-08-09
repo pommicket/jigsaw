@@ -266,7 +266,7 @@ fn read_to_lines(path: &str) -> std::io::Result<Vec<String>> {
 
 #[tokio::main]
 async fn main() {
-	let port = 3000;
+	let port = 54472;
 	let host_addr = SocketAddr::from(([127, 0, 0, 1], port));
 	let listener = match tokio::net::TcpListener::bind(host_addr).await {
 		Ok(l) => l,
