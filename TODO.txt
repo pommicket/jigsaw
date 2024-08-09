@@ -1,1 +1,5 @@
 - limit number of playres connected to a game (prevent contention)
+- congratualations
+- move all connected components to top
+- link to source image
+- increase sensitivity

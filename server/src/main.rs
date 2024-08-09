@@ -1,11 +1,11 @@
 use anyhow::anyhow;
 use futures_util::{SinkExt, StreamExt};
 use rand::Rng;
+use std::io::prelude::*;
 use std::net::SocketAddr;
 use std::sync::LazyLock;
 use tokio::io::AsyncWriteExt;
 use tungstenite::protocol::Message;
-use std::io::prelude::*;
 
 const PUZZLE_ID_CHARSET: &[u8] = b"23456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
 const PUZZLE_ID_LEN: usize = 6;
@@ -56,8 +56,8 @@ async fn handle_connection(
 	let mut ws = tokio_tungstenite::accept_async_with_config(
 		conn,
 		Some(tungstenite::protocol::WebSocketConfig {
-			max_message_size: Some(4096),
-			max_frame_size: Some(4096),
+			max_message_size: Some(65536),
+			max_frame_size: Some(65536),
 			..Default::default()
 		}),
 	)
@@ -250,13 +250,16 @@ async fn handle_connection(
 				ws.send(Message::Binary(data)).await?;
 			} else if text == "randomFeaturedWikimedia" {
 				let choice = rand::thread_rng().gen_range(0..server.wikimedia_featured.len());
-				ws.send(Message::Text(format!("wikimediaImage {}", server.wikimedia_featured[choice]))).await?;
+				ws.send(Message::Text(format!(
+					"wikimediaImage {}",
+					server.wikimedia_featured[choice]
+				)))
+				.await?;
 			}
 		}
 	}
 	Ok(())
 }
-
 
 fn read_to_lines(path: &str) -> std::io::Result<Vec<String>> {
 	let file = std::fs::File::open(path)?;
@@ -282,7 +285,8 @@ async fn main() {
 		}
 	});
 	static SERVER_VALUE: LazyLock<Server> = LazyLock::new(|| {
-		let wikimedia_featured = read_to_lines("featuredpictures.txt").expect("Couldn't read featuredpictures.txt");
+		let wikimedia_featured =
+			read_to_lines("featuredpictures.txt").expect("Couldn't read featuredpictures.txt");
 		let db = sled::open("database.sled").expect("error opening database");
 		let puzzles = db.open_tree("PUZZLES").expect("error opening puzzles tree");
 		let pieces = db.open_tree("PIECES").expect("error opening pieces tree");
