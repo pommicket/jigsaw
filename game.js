@@ -83,7 +83,7 @@ window.addEventListener('load', function () {
 		console.assert(false);
 	}
 	function connectPieces(piece1, piece2) {
-		if (piece1.connectedComponent === piece2.connectedComponent) return;
+		if (piece1.connectedComponent === piece2.connectedComponent) return false;
 		piece1.connectedComponent.push(...piece2.connectedComponent);
 		let piece1Col = piece1.col();
 		let piece1Row = piece1.row();
@@ -95,6 +95,11 @@ window.addEventListener('load', function () {
 			piece.y = (row - piece1Row) * pieceHeight + piece1.y;
 			piece.updatePosition();
 		}
+		if (!solved && piece1.connectedComponent.length === puzzleWidth * puzzleHeight) {
+			solveAudio.play();
+			solved = true;
+		}
+		return true;
 	}
 	class NibType {
 		orientation;
@@ -289,12 +294,9 @@ window.addEventListener('load', function () {
 					if (sqDist < connectRadius * connectRadius) {
 						anyConnected = true;
 						connectPieces(piece, neighbour);
+						socket.send(`connect ${piece.id} ${neighbour.id}`);
 					}
 				}
-			}
-			if (!solved && draggingPiece.connectedComponent.length === puzzleWidth * puzzleHeight) {
-				solveAudio.play();
-				solved = true;
 			}
 			draggingPiece.element.style.removeProperty('cursor');
 			draggingPiece = null;
@@ -326,10 +328,13 @@ window.addEventListener('load', function () {
 	}
 	let imageLoaded = joinPuzzle ? null : loadImage();
 	function updateConnectivity(connectivity) {
+		console.log(connectivity);
 		console.assert(connectivity.length === pieces.length);
+		let anyConnected = false;
 		for (let i = 0; i < pieces.length; i++) {
-			connectPieces(pieces[i], pieces[connectivity[i]]);
+			anyConnected |= connectPieces(pieces[i], pieces[connectivity[i]]);
 		}
+		if (anyConnected) connectAudio.play();
 	}
 	async function initPuzzle(payload) {
 		const data = new Uint8Array(payload, payload.length);
@@ -399,7 +404,7 @@ window.addEventListener('load', function () {
 		const connectivity = new Uint16Array(update, 8 + piecePositions.length * 4, puzzleWidth * puzzleHeight);
 		updateConnectivity(connectivity);
 		for (let i = 0; i < pieces.length; i++) {
-			// only udpate the position of one piece per equivalence class mod is-connected-to
+			// only receive the position of one piece per equivalence class mod is-connected-to
 			if (connectivity[i] !== i) continue;
 			const piece = pieces[i];
 			if (!piece.upToDateWithServer) continue;
@@ -411,6 +416,13 @@ window.addEventListener('load', function () {
 			piece.x = newPos.x;
 			piece.y = newPos.y;
 			piece.updatePosition();
+			// derive all other pieces' position in this connected component from piece.
+			for (const other of piece.connectedComponent) {
+				if (other === piece) continue;
+				other.x = piece.x + (other.col() - piece.col()) * pieceWidth;
+				other.y = piece.y + (other.row() - piece.row()) * pieceHeight;
+				other.updatePosition();
+			}
 		}
 	}
 	function sendServerUpdate() {
