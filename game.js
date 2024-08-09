@@ -15,11 +15,11 @@ window.addEventListener('load', function () {
 	const connectRadius = 5;
 	let pieceZIndexCounter = 1;
 	let draggingPiece = null;
-	let nibSize = 12;
+	let nibSize = 24;
 	let pieceWidth;
 	let pieceHeight;
 	let receivedAck = true;
-	if (imageUrl.startsWith('http')) {
+	if (imageUrl && imageUrl.startsWith('http')) {
 		// make sure we use https
 		let url = new URL(imageUrl);
 		url.protocol = 'https:';
@@ -356,7 +356,7 @@ window.addEventListener('load', function () {
 		const imageUrlOffset = nibTypesOffset + nibTypeCount * 2;
 		const imageUrlLen = new Uint8Array(payload, imageUrlOffset, data.length - imageUrlOffset).indexOf(0);
 		const imageUrlBytes = new Uint8Array(payload, imageUrlOffset, imageUrlLen);
-		let piecePositionsOffset = imageUrlOffset + imageUrlLen;
+		let piecePositionsOffset = imageUrlOffset + imageUrlLen + 1;
 		piecePositionsOffset = Math.floor((piecePositionsOffset + 7) / 8) * 8; // align to 8 bytes
 		const piecePositions = new Float32Array(payload, piecePositionsOffset, puzzleWidth * puzzleHeight * 2);
 		const connectivityOffset = piecePositionsOffset + piecePositions.length * 4;
@@ -366,7 +366,7 @@ window.addEventListener('load', function () {
 			await loadImage();
 		}
 		let nibTypeIndex = 0;
-		pieceWidth = 0.75 * playArea.clientWidth / puzzleWidth;
+		pieceWidth = 0.5 * playArea.clientWidth / puzzleWidth;
 		pieceHeight = pieceWidth * puzzleWidth * image.height / (puzzleHeight * image.width);
 		document.body.style.setProperty('--piece-width', (pieceWidth) + 'px');
 		document.body.style.setProperty('--piece-height', (pieceHeight) + 'px');
@@ -483,7 +483,7 @@ window.addEventListener('load', function () {
 			throw new Error("bad image URL");
 		}
 	});
-	socket.addEventListener('message', (e) => {
+	socket.addEventListener('message', async (e) => {
 		if (typeof e.data === 'string') {
 			if (e.data.startsWith('id: ')) {
 				let puzzleID = e.data.split(' ')[1];
@@ -494,14 +494,13 @@ window.addEventListener('load', function () {
 				}
 				receivedAck = true;
 			} else if (e.data.startsWith('wikimediaImage ')) {
-				console.log(e.data);
-				imageUrl = e.data.substring('wikimediaImage '.length);
+				imageUrl = decodeURI(e.data.substring('wikimediaImage '.length));
 				hostPuzzle();
 			}
 		} else {
 			const opcode = new Uint8Array(e.data, 0, 1)[0];
 			if (opcode === 1 && !pieces.length) { // init puzzle
-				initPuzzle(e.data);
+				await initPuzzle(e.data);
 				setInterval(() => socket.send('poll'), 1000);
 				setInterval(sendServerUpdate, 1000);
 			} else if (opcode === 2) { // update puzzle
