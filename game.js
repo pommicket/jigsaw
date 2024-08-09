@@ -1,24 +1,30 @@
 'use strict';
 window.addEventListener('load', function () {
 	const socket = new WebSocket("ws://localhost:3000");
+	const searchParams = new URL(location.href).searchParams;
 	socket.binaryType = "arraybuffer";
-	let imageUrl = "https://upload.wikimedia.org/wikipedia/commons/0/09/Croatia_Opatija_Maiden_with_the_Seagull_BW_2014-10-10_10-35-13.jpg";
-	let puzzleWidth = 4;
-	let puzzleHeight = 3;
+	let imageUrl = searchParams.get('image');//"https://upload.wikimedia.org/wikipedia/commons/0/09/Croatia_Opatija_Maiden_with_the_Seagull_BW_2014-10-10_10-35-13.jpg";
+	let puzzleWidth, puzzleHeight;
+	const roughPieceCount = parseInt(searchParams.get('pieces'));
 	const getById = (id) => document.getElementById(id);
 	const playArea = getById("play-area");
 	const connectAudio = getById("connect-audio");
 	const solveAudio = getById("solve-audio");
-	const joinPuzzle = new URL(location).searchParams.get('join');
+	const joinPuzzle = searchParams.get('join');
 	let solved = false;
 	const connectRadius = 5;
 	let pieceZIndexCounter = 1;
 	let draggingPiece = null;
 	let nibSize = 12;
-	let pieceWidth = 70;
+	let pieceWidth;
 	let pieceHeight;
 	let receivedAck = true;
-	document.body.style.setProperty('--image', `url("${imageUrl}")`);// TODO : escaping
+	if (imageUrl.startsWith('http')) {
+		// make sure we use https
+		let url = new URL(imageUrl);
+		url.protocol = 'https';
+		imageUrl = url.href;
+	}
 	const image = new Image();
 	const draggingPieceLastPos = Object.preventExtensions({x: null, y: null});
 	let randomSeed = 123456789;
@@ -318,17 +324,16 @@ window.addEventListener('load', function () {
 			draggingPieceLastPos.y = e.clientY;
 		}
 	});
-	function loadImage() {
+	async function loadImage() {
+		document.body.style.setProperty('--image', `url("${encodeURI(imageUrl)}")`);
 		image.src = imageUrl;
-		return new Promise((resolve) => {
+		await new Promise((resolve) => {
 			image.addEventListener('load', function () {
 				resolve();
 			});
 		});
 	}
-	let imageLoaded = joinPuzzle ? null : loadImage();
 	function updateConnectivity(connectivity) {
-		console.log(connectivity);
 		console.assert(connectivity.length === pieces.length);
 		let anyConnected = false;
 		for (let i = 0; i < pieces.length; i++) {
@@ -359,10 +364,9 @@ window.addEventListener('load', function () {
 		if (joinPuzzle) {
 			imageUrl = new TextDecoder().decode(imageUrlBytes);
 			await loadImage();
-		} else {
-			await imageLoaded;
 		}
 		let nibTypeIndex = 0;
+		pieceWidth = 0.75 * playArea.clientWidth / puzzleWidth;
 		pieceHeight = pieceWidth * puzzleWidth * image.height / (puzzleHeight * image.width);
 		document.body.style.setProperty('--piece-width', (pieceWidth) + 'px');
 		document.body.style.setProperty('--piece-height', (pieceHeight) + 'px');
@@ -442,14 +446,42 @@ window.addEventListener('load', function () {
 			socket.send(motions.join('\n'));
 		}
 	}	
-	socket.addEventListener('open', () => {
+	async function hostPuzzle() {
+		await loadImage();
+		if (isNaN(roughPieceCount) || roughPieceCount < 10 || roughPieceCount > 1000) {
+			// TODO : better error reporting
+			console.error('bad piece count');
+			return;
+		}
+		let bestWidth = 1;
+		let bestDiff = Infinity;
+		function heightFromWidth(w) {
+			return Math.min(255, Math.max(2, Math.round(w * image.height / image.width)));
+		}
+		for (let width = 2; width < 256; width++) {
+			const height = heightFromWidth(width);
+			if (width * height > 1000) break;
+			const diff = Math.abs(width * height - roughPieceCount);
+			if (diff < bestDiff) {
+				bestDiff = diff;
+				bestWidth = width;
+			}
+		}
+		puzzleWidth = bestWidth;
+		puzzleHeight = heightFromWidth(puzzleWidth);
+		socket.send(`new ${puzzleWidth} ${puzzleHeight} ${imageUrl}`);
+	}
+	socket.addEventListener('open', async () => {
 		if (joinPuzzle) {
 			socket.send(`join ${joinPuzzle}`);
+		} else if (imageUrl.startsWith('http')) {
+			hostPuzzle();
+		} else if (imageUrl === 'randomFeaturedWikimedia') {
+			socket.send('randomFeaturedWikimedia');
 		} else {
-			socket.send(`new ${puzzleWidth} ${puzzleHeight} ${imageUrl}`);
+			// TODO : better error reporting
+			throw new Error("bad image URL");
 		}
-		setInterval(() => socket.send('poll'), 1000);
-		setInterval(sendServerUpdate, 1000);
 	});
 	socket.addEventListener('message', (e) => {
 		if (typeof e.data === 'string') {
@@ -461,11 +493,17 @@ window.addEventListener('load', function () {
 					piece.upToDateWithServer = true;
 				}
 				receivedAck = true;
+			} else if (e.data.startsWith('wikimediaImage ')) {
+				console.log(e.data);
+				imageUrl = e.data.substring('wikimediaImage '.length);
+				hostPuzzle();
 			}
 		} else {
 			const opcode = new Uint8Array(e.data, 0, 1)[0];
 			if (opcode === 1 && !pieces.length) { // init puzzle
 				initPuzzle(e.data);
+				setInterval(() => socket.send('poll'), 1000);
+				setInterval(sendServerUpdate, 1000);
 			} else if (opcode === 2) { // update puzzle
 				applyUpdate(e.data);
 			}
