@@ -116,25 +116,43 @@ async fn handle_connection(database: &Database, conn: &mut tokio::net::TcpStream
 				puzzle_id = Some(id);
 				let info = get_puzzle_info(&database, &id)?;
 				ws.send(Message::Binary(info)).await?;
-			} else if let Some(data) = text.strip_prefix("move ") {
-				let mut parts = data.split(' ');
+			} else if text.starts_with("move ") {
 				let puzzle_id = puzzle_id.ok_or_else(|| anyhow!("move without puzzle ID"))?;
-				let piece: usize = parts.next().ok_or_else(|| anyhow!("bad syntax"))?.parse()?;
-				let x: f32 = parts.next().ok_or_else(|| anyhow!("bad syntax"))?.parse()?;
-				let y: f32 = parts.next().ok_or_else(|| anyhow!("bad syntax"))?.parse()?;
+				#[derive(Clone, Copy)]
+				struct Motion {
+					piece: usize,
+					x: f32,
+					y: f32,
+				}
+				let mut motions = vec![];
+				for line in text.split('\n') {
+					let mut parts = line.split(' ');
+					parts.next(); // skip "move"
+					let piece: usize = parts.next().ok_or_else(|| anyhow!("bad syntax"))?.parse()?;
+					let x: f32 = parts.next().ok_or_else(|| anyhow!("bad syntax"))?.parse()?;
+					let y: f32 = parts.next().ok_or_else(|| anyhow!("bad syntax"))?.parse()?;
+					motions.push(Motion {
+						piece,
+						x,
+						y,
+					});	
+				}
 				loop {
 					let curr_pieces = database.pieces.get(&puzzle_id)?
 						.ok_or_else(|| anyhow!("bad puzzle ID"))?;
 					let mut new_pieces = curr_pieces.to_vec();
-					new_pieces.get_mut(8 * piece..8 * piece + 4).ok_or_else(|| anyhow!("bad piece ID"))?
-						.copy_from_slice(&x.to_le_bytes());
-					new_pieces.get_mut(8 * piece + 4..8 * piece + 8).ok_or_else(|| anyhow!("bad piece ID"))?
-						.copy_from_slice(&y.to_le_bytes());
+					for Motion {piece, x, y} in motions.iter().copied() {
+						new_pieces.get_mut(8 * piece..8 * piece + 4).ok_or_else(|| anyhow!("bad piece ID"))?
+							.copy_from_slice(&x.to_le_bytes());
+						new_pieces.get_mut(8 * piece + 4..8 * piece + 8).ok_or_else(|| anyhow!("bad piece ID"))?
+							.copy_from_slice(&y.to_le_bytes());
+					}
 					if database.pieces.compare_and_swap(&puzzle_id, Some(curr_pieces), Some(new_pieces))?.is_ok() {
 						break;
 					}
-					tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+					tokio::time::sleep(std::time::Duration::from_millis(1)).await; // yield maybe (don't let contention hog resources)
 				}
+				ws.send(Message::Text("ack".to_string())).await?;
 			} else if text == "poll" {
 				let puzzle_id = puzzle_id.ok_or_else(|| anyhow!("poll without puzzle ID"))?;
 				let pieces = database.pieces.get(&puzzle_id)?.ok_or_else(|| anyhow!("bad puzzle ID"))?;

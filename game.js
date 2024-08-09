@@ -17,6 +17,7 @@ window.addEventListener('load', function () {
 	let nibSize = 12;
 	let pieceWidth = 70;
 	let pieceHeight;
+	let receivedAck = true;
 	document.body.style.setProperty('--image', `url("${imageUrl}")`);// TODO : escaping
 	const image = new Image();
 	const draggingPieceLastPos = Object.preventExtensions({x: null, y: null});
@@ -177,6 +178,7 @@ window.addEventListener('load', function () {
 		element;
 		nibTypes;
 		connectedComponent;
+		upToDateWithServer;
 		getClipPath() {
 			const nibTypes = this.nibTypes;
 			let shoulderWidth = (pieceWidth - nibSize) / 2;
@@ -211,6 +213,7 @@ window.addEventListener('load', function () {
 			this.y = y;
 			this.u = u;
 			this.v = v;
+			this.upToDateWithServer = true;
 			this.connectedComponent = [this];
 			const element = this.element = document.createElement('div');
 			element.classList.add('piece');
@@ -264,11 +267,6 @@ window.addEventListener('load', function () {
 		if (draggingPiece) {
 			let anyConnected = false;
 			for (const piece of draggingPiece.connectedComponent) {
-				const canonicalPos = screenPosToCanonical({
-					x: piece.x,
-					y: piece.y,
-				});
-				socket.send(`move ${piece.id} ${canonicalPos.x} ${canonicalPos.y}`);
 				if (solved) break;
 				const col = piece.col();
 				const row = piece.row();
@@ -312,6 +310,7 @@ window.addEventListener('load', function () {
 				piece.x += dx;
 				piece.y += dy;
 				piece.updatePosition();
+				piece.upToDateWithServer = false;
 			}
 			draggingPieceLastPos.x = e.clientX;
 			draggingPieceLastPos.y = e.clientY;
@@ -403,6 +402,7 @@ window.addEventListener('load', function () {
 			// only udpate the position of one piece per equivalence class mod is-connected-to
 			if (connectivity[i] !== i) continue;
 			const piece = pieces[i];
+			if (!piece.upToDateWithServer) continue;
 			if (draggingPiece && draggingPiece.connectedComponent === piece.connectedComponent) continue;
 			const newPos = canonicalToScreenPos({x: piecePositions[2*i], y: piecePositions[2*i+1]});
 			const diff = [newPos.x - piece.x, newPos.y - piece.y];
@@ -413,7 +413,23 @@ window.addEventListener('load', function () {
 			piece.updatePosition();
 		}
 	}
-	
+	function sendServerUpdate() {
+		// send update to server
+		if (!receivedAck) return; // last update hasn't been acknowledged yet
+		const motions = [];
+		for (const piece of pieces) {
+			if (piece.upToDateWithServer) continue;
+			const canonicalPos = screenPosToCanonical({
+				x: piece.x,
+				y: piece.y,
+			});
+			motions.push(`move ${piece.id} ${canonicalPos.x} ${canonicalPos.y}`);
+		}
+		if (motions.length) {
+			receivedAck = false;
+			socket.send(motions.join('\n'));
+		}
+	}	
 	socket.addEventListener('open', () => {
 		if (joinPuzzle) {
 			socket.send(`join ${joinPuzzle}`);
@@ -421,12 +437,18 @@ window.addEventListener('load', function () {
 			socket.send(`new ${puzzleWidth} ${puzzleHeight} ${imageUrl}`);
 		}
 		setInterval(() => socket.send('poll'), 1000);
+		setInterval(sendServerUpdate, 1000);
 	});
 	socket.addEventListener('message', (e) => {
 		if (typeof e.data === 'string') {
 			if (e.data.startsWith('id: ')) {
 				let puzzleID = e.data.split(' ')[1];
 				console.log('ID:', puzzleID);
+			} else if (e.data === 'ack') {
+				for (const piece of pieces) {
+					piece.upToDateWithServer = true;
+				}
+				receivedAck = true;
 			}
 		} else {
 			const opcode = new Uint8Array(e.data, 0, 1)[0];
