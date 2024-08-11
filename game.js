@@ -1,9 +1,9 @@
 'use strict';
 window.addEventListener('load', function () {
-	const socket = new WebSocket(`${location.protocol === "file:" || location.hostname === "localhost" ? "ws://localhost:54472" : "wss://jigsaw.pommicket.com"}`);
+	const socket = new WebSocket(location.protocol === "file:" || location.hostname === "localhost" ? "ws://localhost:54472" : "wss://jigsaw.pommicket.com");
 	const searchParams = new URL(location.href).searchParams;
 	socket.binaryType = "arraybuffer";
-	let imageUrl = searchParams.get('image');//"https://upload.wikimedia.org/wikipedia/commons/0/09/Croatia_Opatija_Maiden_with_the_Seagull_BW_2014-10-10_10-35-13.jpg";
+	let imageUrl = searchParams.has('image') ? encodeURI(searchParams.get('image')) : undefined;
 	let puzzleWidth, puzzleHeight;
 	const roughPieceCount = parseInt(searchParams.get('pieces'));
 	const getById = (id) => document.getElementById(id);
@@ -11,6 +11,16 @@ window.addEventListener('load', function () {
 	const connectAudio = getById("connect-audio");
 	const solveAudio = getById("solve-audio");
 	const joinPuzzle = searchParams.get('join');
+	const joinLink = getById('join-link');
+	function setJoinLink(puzzleID) {
+		const url = new URL(location.href);
+		url.hash = '';
+		joinLink.href = '?' + new URLSearchParams({
+			join: puzzleID
+		}).toString();
+		joinLink.style.display = 'inline';
+	}
+	if (joinPuzzle) setJoinLink(joinPuzzle);
 	let solved = false;
 	const connectRadius = 10;
 	let pieceZIndexCounter = 1;
@@ -248,9 +258,6 @@ window.addEventListener('load', function () {
 			});
 			this.updateUV();
 			this.updatePosition();
-			const debugCurves = false;//display bezier control points for debugging
-			if (debugCurves)
-				playArea.appendChild(element);
 			this.nibTypes = nibTypes;
 			const clipPath = this.getClipPath();
 			this.element.style.clipPath = `path("${clipPath}")`;
@@ -260,8 +267,7 @@ window.addEventListener('load', function () {
 			svg.setAttribute('viewBox', `0 0 ${pieceWidth + 2 * nibSize} ${pieceHeight + 2 * nibSize}`);
 			svg.innerHTML = `<path d="${clipPath}" stroke-width="1" stroke="black" fill="none" />`;
 			this.element.appendChild(svg);
-			if (!debugCurves)
-				playArea.appendChild(element);
+			playArea.appendChild(element);
 		}
 		updateUV() {
 			this.element.style.backgroundPositionX = (nibSize - this.u) + 'px';
@@ -337,7 +343,10 @@ window.addEventListener('load', function () {
 		}
 	});
 	async function loadImage() {
-		document.body.style.setProperty('--image', `url("${encodeURI(imageUrl)}")`);
+		document.body.style.setProperty('--image', `url("${imageUrl}")`);
+		const imageLink = getById('image-link');
+		imageLink.style.visibility = 'visible';
+		imageLink.href = imageUrl;
 		image.src = imageUrl;
 		await new Promise((resolve) => {
 			image.addEventListener('load', function () {
@@ -510,7 +519,8 @@ window.addEventListener('load', function () {
 		if (typeof e.data === 'string') {
 			if (e.data.startsWith('id: ')) {
 				let puzzleID = e.data.split(' ')[1];
-				console.log('ID:', puzzleID);
+				history.pushState({}, null, `?join=${puzzleID}`);
+				setJoinLink(puzzleID);
 			} else if (e.data === 'ack') {
 				for (const piece of pieces) {
 					piece.upToDateWithServer = true;
@@ -518,7 +528,7 @@ window.addEventListener('load', function () {
 				receivedAck = true;
 			} else if (waitingForServerToGiveUsImageUrl && e.data.startsWith('useImage ')) {
 				waitingForServerToGiveUsImageUrl = false;
-				imageUrl = decodeURI(e.data.substring('useImage '.length));
+				imageUrl = e.data.substring('useImage '.length);
 				hostPuzzle();
 			}
 		} else {
