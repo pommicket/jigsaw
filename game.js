@@ -12,10 +12,10 @@ window.addEventListener('load', function () {
 	const solveAudio = getById("solve-audio");
 	const joinPuzzle = searchParams.get('join');
 	let solved = false;
-	const connectRadius = 5;
+	const connectRadius = 10;
 	let pieceZIndexCounter = 1;
 	let draggingPiece = null;
-	let nibSize = 24;
+	let nibSize;
 	let pieceWidth;
 	let pieceHeight;
 	let receivedAck = true;
@@ -90,7 +90,16 @@ window.addEventListener('load', function () {
 	}
 	function connectPieces(piece1, piece2) {
 		if (piece1.connectedComponent === piece2.connectedComponent) return false;
+		if (piece1.connectedComponent.length < piece2.connectedComponent.length) {
+			// always connect the smaller component to the larger component
+			return connectPieces(piece2, piece1);
+		}
 		piece1.connectedComponent.push(...piece2.connectedComponent);
+		const maxZIndex = Math.max(...piece1.connectedComponent.map((x) => parseInt(x.element.style.zIndex)));
+		for (const piece of piece1.connectedComponent) {
+			// update z-index to max in connected component
+			piece.element.style.zIndex = maxZIndex;
+		}
 		let piece1Col = piece1.col();
 		let piece1Row = piece1.row();
 		for (const piece of piece2.connectedComponent) {
@@ -234,7 +243,7 @@ window.addEventListener('load', function () {
 				draggingPiece = outerThis;
 				draggingPieceLastPos.x = e.clientX;
 				draggingPieceLastPos.y = e.clientY;
-				this.style.zIndex = pieceZIndexCounter++;
+				this.style.zIndex = ++pieceZIndexCounter;
 				this.style.cursor = 'none';
 			});
 			this.updateUV();
@@ -278,6 +287,8 @@ window.addEventListener('load', function () {
 		if (draggingPiece) {
 			let anyConnected = false;
 			for (const piece of draggingPiece.connectedComponent) {
+				piece.element.classList.remove('no-animation');
+				piece.element.style.zIndex = pieceZIndexCounter;
 				if (solved) break;
 				const col = piece.col();
 				const row = piece.row();
@@ -315,6 +326,7 @@ window.addEventListener('load', function () {
 			let dx = e.clientX - draggingPieceLastPos.x;
 			let dy = e.clientY - draggingPieceLastPos.y;
 			for (const piece of draggingPiece.connectedComponent) {
+				piece.element.classList.add('no-animation');
 				piece.x += dx;
 				piece.y += dy;
 				piece.updatePosition();
@@ -368,6 +380,7 @@ window.addEventListener('load', function () {
 		let nibTypeIndex = 0;
 		pieceWidth = 0.5 * playArea.clientWidth / puzzleWidth;
 		pieceHeight = pieceWidth * puzzleWidth * image.height / (puzzleHeight * image.width);
+		nibSize = Math.min(pieceWidth / 4, pieceHeight / 4);
 		document.body.style.setProperty('--piece-width', (pieceWidth) + 'px');
 		document.body.style.setProperty('--piece-height', (pieceHeight) + 'px');
 		document.body.style.setProperty('--nib-size', (nibSize) + 'px');

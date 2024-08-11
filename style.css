@@ -23,6 +23,11 @@ body {
 	height: calc(var(--piece-height) + 2 * var(--nib-size));
 	background-image: var(--image);
 	background-size: var(--image-width) var(--image-height);
+	transition: top 0.3s ease-in-out, left 0.3s ease-in-out;
+}
+
+.no-animation {
+	transition: none !important;
 }
 
 .debug-point {
