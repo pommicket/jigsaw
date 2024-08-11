@@ -379,10 +379,10 @@ window.addEventListener('load', function () {
 		}
 		let nibTypeIndex = 0;
 		if (playArea.clientWidth / puzzleWidth < playArea.clientHeight / puzzleHeight) {
-			pieceWidth = 0.5 * playArea.clientWidth / puzzleWidth;
+			pieceWidth = 0.6 * playArea.clientWidth / puzzleWidth;
 			pieceHeight = pieceWidth * (puzzleWidth / puzzleHeight) * (image.height / image.width);
 		} else {
-			pieceHeight = 0.5 * playArea.clientHeight / puzzleHeight;
+			pieceHeight = 0.6 * playArea.clientHeight / puzzleHeight;
 			pieceWidth = pieceHeight * (puzzleHeight / puzzleWidth) * (image.width / image.height);
 		}
 		nibSize = Math.min(pieceWidth / 4, pieceHeight / 4);

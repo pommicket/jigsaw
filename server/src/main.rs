@@ -116,21 +116,26 @@ async fn handle_connection(
 				}
 				drop(puzzle_data); // should be empty now
 				puzzle_id = Some(id);
-				let mut pieces_data: Vec<u8>;
+				let pieces_data: Box<[u8]>;
 				{
 					let mut rng = rand::thread_rng();
-					pieces_data = Vec::new();
-					pieces_data.resize((width as usize) * (height as usize) * 8, 0);
+					let mut positions = vec![];
+					positions.reserve_exact((width as usize) * (height as usize));
 					// positions
-					let mut it = pieces_data.iter_mut();
-					for _ in 0..(width as u16) * (height as u16) * 2 {
-						let coord: f32 = rng.gen();
-						let [a, b, c, d] = coord.to_le_bytes();
-						*it.next().unwrap() = a;
-						*it.next().unwrap() = b;
-						*it.next().unwrap() = c;
-						*it.next().unwrap() = d;
+					for y in 0..(height as u16) {
+						for x in 0..(width as u16) {
+							let dx: f32 = rng.gen_range(0.0..0.5);
+							let dy: f32 = rng.gen_range(0.0..0.5);
+							positions.push([(x as f32 + dx) / ((width + 1) as f32), (y as f32 + dy) / ((height + 1) as f32)]);
+						}
 					}
+					positions.shuffle(&mut rng);
+					// rust isn't smart enough to do the zero-copy with f32::to_le_bytes and Vec::into_flattened
+					let ptr: *mut [[f32; 2]] = Box::into_raw(positions.into_boxed_slice());
+					let ptr: *mut [u8] = std::ptr::slice_from_raw_parts_mut(ptr.cast(), (width as usize) * (height as usize) * 8);
+					// evil unsafe code >:3
+					pieces_data = unsafe { Box::from_raw(ptr) };
+					
 				}
 				server.pieces.insert(id, pieces_data)?;
 				let mut connectivity_data = Vec::new();
