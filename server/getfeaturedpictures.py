@@ -16,7 +16,7 @@ def make_file_request(cmcontinue):
 		break
 	return json.loads(response.text)
 
-def make_url_request(images):
+def get_urls_of_images(images):
 	while True:
 		time.sleep(1)
 		url = 'https://commons.wikimedia.org/w/api.php?action=query&format=json&maxlag=5&prop=imageinfo&iiprop=url&titles=' + urllib.parse.quote('|'.join(images))
@@ -24,9 +24,10 @@ def make_url_request(images):
 		if 'X-Database-Lag' in response.headers:
 			time.sleep(5)
 		break
-	return json.loads(response.text)
-
-def get_files():
+	response = json.loads(response.text)
+	return [page['imageinfo'][0]['url'] for page in response['query']['pages'].values()]
+	
+def get_featured_files():
 	with open('featuredpictures_files.txt', 'w') as f:
 		cmcontinue = ''
 		count = 0
@@ -47,14 +48,15 @@ def get_files():
 				print('no continue! done probably')
 				break
 			
-def get_urls():
+def get_featured_urls():
 	with open('featuredpictures_files.txt', 'r') as f:
 		files = [line.strip() for line in f]
 	with open('featuredpictures.txt', 'w') as f:
 		for i in range(0, len(files), 30):
 			print('got URLs for',i,'files')
 			batch = files[i:min(len(files), i + 30)]
-			response = make_url_request(batch)
-			f.write(''.join(page['imageinfo'][0]['url'] + '\n' for page in response['query']['pages'].values()))
-get_files()
-get_urls()
+			urls = get_urls(batch)
+			f.write(''.join(url + '\n' for url in urls))
+if __name__ == '__main__':
+	get_featured_files()
+	get_featured_urls()

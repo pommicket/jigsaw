@@ -489,6 +489,7 @@ window.addEventListener('load', function () {
 		puzzleHeight = heightFromWidth(puzzleWidth);
 		socket.send(`new ${puzzleWidth} ${puzzleHeight} ${imageUrl}`);
 	}
+	let waitingForServerToGiveUsImageUrl = false;
 	socket.addEventListener('open', async () => {
 		if (joinPuzzle) {
 			socket.send(`join ${joinPuzzle}`);
@@ -496,6 +497,10 @@ window.addEventListener('load', function () {
 			hostPuzzle();
 		} else if (imageUrl === 'randomFeaturedWikimedia') {
 			socket.send('randomFeaturedWikimedia');
+			waitingForServerToGiveUsImageUrl = true;
+		} else if (imageUrl === 'wikimediaPotd') {
+			socket.send('wikimediaPotd');
+			waitingForServerToGiveUsImageUrl = true;
 		} else {
 			// TODO : better error reporting
 			throw new Error("bad image URL");
@@ -511,8 +516,9 @@ window.addEventListener('load', function () {
 					piece.upToDateWithServer = true;
 				}
 				receivedAck = true;
-			} else if (e.data.startsWith('wikimediaImage ')) {
-				imageUrl = decodeURI(e.data.substring('wikimediaImage '.length));
+			} else if (waitingForServerToGiveUsImageUrl && e.data.startsWith('useImage ')) {
+				waitingForServerToGiveUsImageUrl = false;
+				imageUrl = decodeURI(e.data.substring('useImage '.length));
 				hostPuzzle();
 			}
 		} else {

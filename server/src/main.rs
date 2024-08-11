@@ -1,13 +1,13 @@
 use anyhow::anyhow;
 use futures_util::{SinkExt, StreamExt};
-use rand::Rng;
 use rand::seq::SliceRandom;
+use rand::Rng;
 use std::io::prelude::*;
 use std::net::SocketAddr;
-use std::sync::LazyLock;
+use std::time::{Duration, SystemTime};
 use tokio::io::AsyncWriteExt;
+use tokio::sync::RwLock;
 use tungstenite::protocol::Message;
-use std::time::{SystemTime, Duration};
 
 const PUZZLE_ID_CHARSET: &[u8] = b"23456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
 const PUZZLE_ID_LEN: usize = 7;
@@ -17,11 +17,13 @@ fn generate_puzzle_id() -> [u8; PUZZLE_ID_LEN] {
 	[(); 7].map(|()| *PUZZLE_ID_CHARSET.choose(&mut rng).unwrap())
 }
 
+#[derive(Debug)]
 struct Server {
 	puzzles: sled::Tree,
 	pieces: sled::Tree,
 	connectivity: sled::Tree,
 	wikimedia_featured: Vec<String>,
+	wikimedia_potd: RwLock<String>,
 }
 
 fn get_puzzle_info(server: &Server, id: &[u8]) -> anyhow::Result<Vec<u8>> {
@@ -84,7 +86,10 @@ async fn handle_connection(
 					return Err(anyhow!("too many pieces"));
 				}
 				let mut puzzle_data = vec![width, height];
-				let timestamp: u64 = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("time went backwards :/").as_secs();
+				let timestamp: u64 = SystemTime::now()
+					.duration_since(SystemTime::UNIX_EPOCH)
+					.expect("time went backwards :/")
+					.as_secs();
 				for byte in timestamp.to_le_bytes() {
 					puzzle_data.push(byte);
 				}
@@ -126,35 +131,37 @@ async fn handle_connection(
 						for x in 0..(width as u16) {
 							let dx: f32 = rng.gen_range(0.0..0.5);
 							let dy: f32 = rng.gen_range(0.0..0.5);
-							positions.push([(x as f32 + dx) / ((width + 1) as f32), (y as f32 + dy) / ((height + 1) as f32)]);
+							positions.push([
+								(x as f32 + dx) / ((width + 1) as f32),
+								(y as f32 + dy) / ((height + 1) as f32),
+							]);
 						}
 					}
 					positions.shuffle(&mut rng);
 					// rust isn't smart enough to do the zero-copy with f32::to_le_bytes and Vec::into_flattened
 					let ptr: *mut [[f32; 2]] = Box::into_raw(positions.into_boxed_slice());
-					let ptr: *mut [u8] = std::ptr::slice_from_raw_parts_mut(ptr.cast(), (width as usize) * (height as usize) * 8);
+					let ptr: *mut [u8] = std::ptr::slice_from_raw_parts_mut(
+						ptr.cast(),
+						(width as usize) * (height as usize) * 8,
+					);
 					// evil unsafe code >:3
 					pieces_data = unsafe { Box::from_raw(ptr) };
-					
 				}
 				server.pieces.insert(id, pieces_data)?;
-				let mut connectivity_data = Vec::new();
-				connectivity_data.resize((width as usize) * (height as usize) * 2, 0);
-				let mut it = connectivity_data.iter_mut();
+				let mut connectivity_data =
+					Vec::with_capacity((width as usize) * (height as usize) * 2);
 				for i in 0..(width as u16) * (height as u16) {
-					let [a, b] = i.to_le_bytes();
-					*it.next().unwrap() = a;
-					*it.next().unwrap() = b;
+					connectivity_data.extend(i.to_le_bytes());
 				}
 				server.connectivity.insert(id, connectivity_data)?;
 				ws.send(Message::Text(format!("id: {}", std::str::from_utf8(&id)?)))
 					.await?;
-				let info = get_puzzle_info(&server, &id)?;
+				let info = get_puzzle_info(server, &id)?;
 				ws.send(Message::Binary(info)).await?;
 			} else if let Some(id) = text.strip_prefix("join ") {
 				let id = id.as_bytes().try_into()?;
 				puzzle_id = Some(id);
-				let info = get_puzzle_info(&server, &id)?;
+				let info = get_puzzle_info(server, &id)?;
 				ws.send(Message::Binary(info)).await?;
 			} else if text.starts_with("move ") {
 				let puzzle_id = puzzle_id.ok_or_else(|| anyhow!("move without puzzle ID"))?;
@@ -177,7 +184,7 @@ async fn handle_connection(
 				loop {
 					let curr_pieces = server
 						.pieces
-						.get(&puzzle_id)?
+						.get(puzzle_id)?
 						.ok_or_else(|| anyhow!("bad puzzle ID"))?;
 					let mut new_pieces = curr_pieces.to_vec();
 					for Motion { piece, x, y } in motions.iter().copied() {
@@ -192,7 +199,7 @@ async fn handle_connection(
 					}
 					if server
 						.pieces
-						.compare_and_swap(&puzzle_id, Some(curr_pieces), Some(new_pieces))?
+						.compare_and_swap(puzzle_id, Some(curr_pieces), Some(new_pieces))?
 						.is_ok()
 					{
 						break;
@@ -208,7 +215,7 @@ async fn handle_connection(
 				loop {
 					let curr_connectivity = server
 						.connectivity
-						.get(&puzzle_id)?
+						.get(puzzle_id)?
 						.ok_or_else(|| anyhow!("bad puzzle ID"))?;
 					let mut new_connectivity = curr_connectivity.to_vec();
 					if piece1 >= curr_connectivity.len() / 2
@@ -235,7 +242,7 @@ async fn handle_connection(
 					if server
 						.connectivity
 						.compare_and_swap(
-							&puzzle_id,
+							puzzle_id,
 							Some(curr_connectivity),
 							Some(new_connectivity),
 						)?
@@ -249,11 +256,11 @@ async fn handle_connection(
 				let puzzle_id = puzzle_id.ok_or_else(|| anyhow!("poll without puzzle ID"))?;
 				let pieces = server
 					.pieces
-					.get(&puzzle_id)?
+					.get(puzzle_id)?
 					.ok_or_else(|| anyhow!("bad puzzle ID"))?;
 				let connectivity = server
 					.connectivity
-					.get(&puzzle_id)?
+					.get(puzzle_id)?
 					.ok_or_else(|| anyhow!("bad puzzle ID"))?;
 				let mut data = vec![2, 0, 0, 0, 0, 0, 0, 0]; // opcode / version number + padding
 				data.extend_from_slice(&pieces);
@@ -262,8 +269,14 @@ async fn handle_connection(
 			} else if text == "randomFeaturedWikimedia" {
 				let choice = rand::thread_rng().gen_range(0..server.wikimedia_featured.len());
 				ws.send(Message::Text(format!(
-					"wikimediaImage {}",
+					"useImage {}",
 					server.wikimedia_featured[choice]
+				)))
+				.await?;
+			} else if text == "wikimediaPotd" {
+				ws.send(Message::Text(format!(
+					"useImage {}",
+					server.wikimedia_potd.read().await
 				)))
 				.await?;
 			}
@@ -278,6 +291,23 @@ fn read_to_lines(path: &str) -> std::io::Result<Vec<String>> {
 	reader.lines().collect()
 }
 
+async fn try_get_potd() -> anyhow::Result<String> {
+	let output = tokio::process::Command::new("python3")
+		.arg("potd.py")
+		.output()
+		.await?;
+	Ok(String::from_utf8(output.stdout)?.trim().to_string())
+}
+async fn get_potd() -> String {
+	match try_get_potd().await {
+		Ok(s) => s,
+		Err(e) => {
+			eprintln!("couldn't get potd: {e}");
+			String::new()
+		}
+	}
+}
+
 #[tokio::main]
 async fn main() {
 	let port = 54472;
@@ -289,7 +319,9 @@ async fn main() {
 			return;
 		}
 	};
-	static SERVER_VALUE: LazyLock<Server> = LazyLock::new(|| {
+	let start_time = SystemTime::now();
+	// leak this since we need all threads to be able to access this
+	let server: &'static Server = Box::leak(Box::new({
 		let wikimedia_featured =
 			read_to_lines("featuredpictures.txt").expect("Couldn't read featuredpictures.txt");
 		let db = sled::open("database.sled").expect("error opening database");
@@ -298,14 +330,30 @@ async fn main() {
 		let connectivity = db
 			.open_tree("CONNECTIVITY")
 			.expect("error opening connectivity tree");
+		let potd = get_potd().await;
 		Server {
 			puzzles,
 			pieces,
 			connectivity,
+			wikimedia_potd: RwLock::new(potd),
 			wikimedia_featured,
 		}
+	}));
+	tokio::task::spawn(async move {
+		fn next_day(t: SystemTime) -> SystemTime {
+			let day = 60 * 60 * 24;
+			let dt = t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+			SystemTime::UNIX_EPOCH + Duration::from_secs((dt + day - 1) / day * day)
+		}
+		let mut last_time = start_time;
+		loop {
+			let time_to_sleep = next_day(last_time).duration_since(last_time).unwrap();
+			tokio::time::sleep(time_to_sleep).await;
+			let potd = get_potd().await;
+			*server.wikimedia_potd.write().await = potd;
+			last_time = SystemTime::now();
+		}
 	});
-	let server: &Server = &SERVER_VALUE;
 	tokio::task::spawn(async {
 		loop {
 			// TODO : sweep
@@ -314,17 +362,29 @@ async fn main() {
 			for item in server.puzzles.iter() {
 				let (key, value) = item.expect("sweep failed to read database");
 				let timestamp: [u8; 8] = value[2..2 + 8].try_into().unwrap();
-				let timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(u64::from_le_bytes(timestamp));
-				if now.duration_since(timestamp).unwrap_or_default() >= Duration::from_secs(60 * 60 * 24 * 7) {
+				let timestamp =
+					SystemTime::UNIX_EPOCH + Duration::from_secs(u64::from_le_bytes(timestamp));
+				if now.duration_since(timestamp).unwrap_or_default()
+					>= Duration::from_secs(60 * 60 * 24 * 7)
+				{
 					// delete puzzles created at least 1 week ago
 					to_delete.push(key);
 				}
 			}
 			for key in to_delete {
 				// technically there is a race condition here but stop being silly
-				server.puzzles.remove(&key).expect("sweep failed to delete entry");
-				server.pieces.remove(&key).expect("sweep failed to delete entry");
-				server.connectivity.remove(&key).expect("sweep failed to delete entry");
+				server
+					.puzzles
+					.remove(&key)
+					.expect("sweep failed to delete entry");
+				server
+					.pieces
+					.remove(&key)
+					.expect("sweep failed to delete entry");
+				server
+					.connectivity
+					.remove(&key)
+					.expect("sweep failed to delete entry");
 			}
 			tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
 		}

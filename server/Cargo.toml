@@ -8,6 +8,6 @@ anyhow = "1.0.86"
 futures-util = "0.3"
 rand = { version = "0.8.5", features = ["std", "std_rng"] }
 sled = "0.34.7"
-tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread", "net", "io-util", "sync", "time"] }
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread", "net", "io-util", "sync", "time", "process"] }
 tokio-tungstenite = "0.23.1"
 tungstenite = "0.23.0"
