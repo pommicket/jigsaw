@@ -1,18 +1,20 @@
 use anyhow::anyhow;
 use futures_util::{SinkExt, StreamExt};
 use rand::Rng;
+use rand::seq::SliceRandom;
 use std::io::prelude::*;
 use std::net::SocketAddr;
 use std::sync::LazyLock;
 use tokio::io::AsyncWriteExt;
 use tungstenite::protocol::Message;
+use std::time::{SystemTime, Duration};
 
 const PUZZLE_ID_CHARSET: &[u8] = b"23456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
-const PUZZLE_ID_LEN: usize = 6;
+const PUZZLE_ID_LEN: usize = 7;
 
 fn generate_puzzle_id() -> [u8; PUZZLE_ID_LEN] {
 	let mut rng = rand::thread_rng();
-	[(); 6].map(|()| PUZZLE_ID_CHARSET[rng.gen_range(0..PUZZLE_ID_CHARSET.len())])
+	[(); 7].map(|()| *PUZZLE_ID_CHARSET.choose(&mut rng).unwrap())
 }
 
 struct Server {
@@ -82,6 +84,10 @@ async fn handle_connection(
 					return Err(anyhow!("too many pieces"));
 				}
 				let mut puzzle_data = vec![width, height];
+				let timestamp: u64 = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("time went backwards :/").as_secs();
+				for byte in timestamp.to_le_bytes() {
+					puzzle_data.push(byte);
+				}
 				// pick nib types
 				{
 					let mut rng = rand::thread_rng();
@@ -278,12 +284,6 @@ async fn main() {
 			return;
 		}
 	};
-	tokio::task::spawn(async {
-		loop {
-			// TODO : sweep
-			tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-		}
-	});
 	static SERVER_VALUE: LazyLock<Server> = LazyLock::new(|| {
 		let wikimedia_featured =
 			read_to_lines("featuredpictures.txt").expect("Couldn't read featuredpictures.txt");
@@ -301,6 +301,29 @@ async fn main() {
 		}
 	});
 	let server: &Server = &SERVER_VALUE;
+	tokio::task::spawn(async {
+		loop {
+			// TODO : sweep
+			let now = SystemTime::now();
+			let mut to_delete = vec![];
+			for item in server.puzzles.iter() {
+				let (key, value) = item.expect("sweep failed to read database");
+				let timestamp: [u8; 8] = value[2..2 + 8].try_into().unwrap();
+				let timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(u64::from_le_bytes(timestamp));
+				if now.duration_since(timestamp).unwrap_or_default() >= Duration::from_secs(60 * 60 * 24 * 7) {
+					// delete puzzles created at least 1 week ago
+					to_delete.push(key);
+				}
+			}
+			for key in to_delete {
+				// technically there is a race condition here but stop being silly
+				server.puzzles.remove(&key).expect("sweep failed to delete entry");
+				server.pieces.remove(&key).expect("sweep failed to delete entry");
+				server.connectivity.remove(&key).expect("sweep failed to delete entry");
+			}
+			tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+		}
+	});
 	loop {
 		let (mut stream, addr) = match listener.accept().await {
 			Ok(result) => result,

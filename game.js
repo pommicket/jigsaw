@@ -362,7 +362,7 @@ window.addEventListener('load', function () {
 			console.assert(puzzleWidth === data[8]);
 			console.assert(puzzleHeight === data[9]);
 		}
-		const nibTypesOffset = 10;
+		const nibTypesOffset = 10 + 8 /* timestamp - not relevant to us */;
 		const nibTypeCount = 2 * puzzleWidth * puzzleHeight - puzzleWidth - puzzleHeight;
 		const nibTypes = new Uint16Array(payload, nibTypesOffset, nibTypeCount);
 		const imageUrlOffset = nibTypesOffset + nibTypeCount * 2;
@@ -378,8 +378,13 @@ window.addEventListener('load', function () {
 			await loadImage();
 		}
 		let nibTypeIndex = 0;
-		pieceWidth = 0.5 * playArea.clientWidth / puzzleWidth;
-		pieceHeight = pieceWidth * puzzleWidth * image.height / (puzzleHeight * image.width);
+		if (playArea.clientWidth / puzzleWidth < playArea.clientHeight / puzzleHeight) {
+			pieceWidth = 0.5 * playArea.clientWidth / puzzleWidth;
+			pieceHeight = pieceWidth * (puzzleWidth / puzzleHeight) * (image.height / image.width);
+		} else {
+			pieceHeight = 0.5 * playArea.clientHeight / puzzleHeight;
+			pieceWidth = pieceHeight * (puzzleHeight / puzzleWidth) * (image.width / image.height);
+		}
 		nibSize = Math.min(pieceWidth / 4, pieceHeight / 4);
 		document.body.style.setProperty('--piece-width', (pieceWidth) + 'px');
 		document.body.style.setProperty('--piece-height', (pieceHeight) + 'px');
