@@ -530,6 +530,9 @@ window.addEventListener('load', function () {
 				waitingForServerToGiveUsImageUrl = false;
 				imageUrl = e.data.substring('useImage '.length);
 				hostPuzzle();
+			} else if (e.data.startsWith('error ')) {
+				const error = e.data.substring('error '.length);
+				console.error(error); // TODO : better error handling
 			}
 		} else {
 			const opcode = new Uint8Array(e.data, 0, 1)[0];

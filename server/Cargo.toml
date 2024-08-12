@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.86"
 futures-util = "0.3"
 rand = { version = "0.8.5", features = ["std", "std_rng"] }
 sled = "0.34.7"
