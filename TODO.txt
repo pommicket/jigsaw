@@ -1,5 +1,4 @@
 - single player mode with no server
-- limit number of playres connected to a game (prevent contention)
 - congratualations
 - handle server errors on the client side
-- when server moves pieces bring their zIndex up
+- link to wikimedia File: page rather than image

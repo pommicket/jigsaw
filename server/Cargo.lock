@@ -285,11 +285,11 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "rand",
+ "safe-transmute",
  "tokio",
  "tokio-postgres",
  "tokio-tungstenite",
  "tungstenite",
- "zerocopy",
 ]
 
 [[package]]
@@ -544,6 +544,12 @@ name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f"
+
+[[package]]
+name = "safe-transmute"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3944826ff8fa8093089aba3acb4ef44b9446a99a16f3bf4e74af3f77d340ab7d"
 
 [[package]]
 name = "scopeguard"

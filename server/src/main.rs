@@ -1,9 +1,9 @@
-#![allow(dead_code)] // TODO :  delete me
-#![allow(unused_variables)] // TODO :  delete me
+#![allow(clippy::too_many_arguments)]
 
 use futures_util::{SinkExt, StreamExt};
 use rand::seq::SliceRandom;
 use rand::Rng;
+use safe_transmute::{transmute_many_pedantic, transmute_to_bytes};
 use std::collections::HashMap;
 use std::io::prelude::*;
 use std::net::SocketAddr;
@@ -12,11 +12,11 @@ use std::time::{Duration, SystemTime};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, RwLock};
 use tungstenite::protocol::Message;
-use zerocopy::AsBytes;
 
 const PUZZLE_ID_CHARSET: &[u8] = b"23456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
 const PUZZLE_ID_LEN: usize = 7;
 const MAX_PLAYERS: u16 = 20;
+const MAX_PIECES: usize = 1000;
 
 fn generate_puzzle_id() -> [u8; PUZZLE_ID_LEN] {
 	let mut rng = rand::thread_rng();
@@ -32,45 +32,179 @@ struct Server {
 	database: tokio_postgres::Client,
 }
 
+struct PieceInfo {
+	positions: Vec<f32>,
+	connectivity: Vec<i16>,
+}
+
+struct PuzzleInfo {
+	width: u8,
+	height: u8,
+	url: String,
+	nib_types: Vec<i16>,
+	piece_info: PieceInfo,
+}
 
 impl Server {
 	async fn create_table_if_not_exists(&self) -> Result<()> {
-		if self.database.query("SELECT FROM puzzles", &[]).await.is_ok() {
-			return Ok(());
-		} else {
-			self.database.execute("CREATE TABLE puzzles (
-				id char($1) PRIMARY KEY,
+		if self
+			.database
+			.query("SELECT FROM puzzles", &[])
+			.await
+			.is_err()
+		{
+			self.database
+				.execute(
+					&format!(
+						"CREATE TABLE puzzles (
+				id char({PUZZLE_ID_LEN}) PRIMARY KEY,
 				url varchar(256),
-				create_time timestamp,
+				width int4,
+				height int4,
+				create_time timestamp DEFAULT CURRENT_TIMESTAMP,
+				nib_types int2[],
 				connectivity int2[],
 				positions float4[]
-			)", &[&(PUZZLE_ID_LEN as i32)]).await?;
-			return Ok(());
+			)"
+					),
+					&[],
+				)
+				.await?;
 		}
+		Ok(())
 	}
 	async fn try_register_id(&self, id: [u8; PUZZLE_ID_LEN]) -> Result<bool> {
-		todo!()
+		let id = std::str::from_utf8(&id)?;
+		Ok(self
+			.database
+			.execute("INSERT INTO puzzles (id) VALUES ($1)", &[&id])
+			.await
+			.is_ok())
 	}
-	async fn set_puzzle_data(&self, id: [u8; PUZZLE_ID_LEN], width: u8, height: u8, url: &str, nib_types: Vec<u16>, piece_positions: Vec<f32>, connectivity_data: Vec<u16>) -> Result<()> {
-		todo!()
+	async fn set_puzzle_data(
+		&self,
+		id: [u8; PUZZLE_ID_LEN],
+		width: u8,
+		height: u8,
+		url: &str,
+		nib_types: Vec<u16>,
+		piece_positions: Vec<f32>,
+		connectivity: Vec<u16>,
+	) -> Result<()> {
+		let id = std::str::from_utf8(&id)?;
+		let width = i32::from(width);
+		let height = i32::from(height);
+		// transmuting u16 to i16 should never give an error. they have the same alignment.
+		let nib_types: &[i16] =
+			transmute_many_pedantic(transmute_to_bytes(&nib_types[..])).unwrap();
+		let connectivity: &[i16] =
+			transmute_many_pedantic(transmute_to_bytes(&connectivity[..])).unwrap();
+		let positions = &piece_positions;
+		self.database
+			.execute(
+				"UPDATE puzzles SET width = $1, height = $2, url = $3, nib_types = $4,
+					    connectivity = $5, positions = $6 WHERE id = $7",
+				&[
+					&width,
+					&height,
+					&url,
+					&nib_types,
+					&connectivity,
+					&positions,
+					&id,
+				],
+			)
+			.await?;
+		Ok(())
 	}
-	async fn move_piece(&self, piece: usize, x: f32, y: f32) -> Result<()> {
-		todo!()
+	async fn move_piece(
+		&self,
+		id: [u8; PUZZLE_ID_LEN],
+		piece: usize,
+		x: f32,
+		y: f32,
+	) -> Result<()> {
+		let id = std::str::from_utf8(&id)?;
+		if piece > MAX_PIECES {
+			return Err(Error::BadPieceID);
+		}
+		let piece = piece as i32;
+		// NOTE: postgresql arrays start at index 1!
+		let i0 = piece * 2 + 1;
+		let i1 = piece * 2 + 2;
+		self.database.execute(
+			"UPDATE puzzles SET positions[$1] = $2, positions[$3] = $4 WHERE id = $5 AND $6 < width * height",
+			// the $6 < width * height protects against OOB access!
+			&[&i0, &x, &i1, &y, &id, &piece]
+		).await?;
+		Ok(())
 	}
-	async fn connect_pieces(&self, piece1: usize, piece2: usize) -> Result<()> {
-		todo!()
+	async fn connect_pieces(
+		&self,
+		id: [u8; PUZZLE_ID_LEN],
+		piece1: usize,
+		piece2: usize,
+	) -> Result<()> {
+		let id = std::str::from_utf8(&id)?;
+		// NOTE: postgresql arrays start at index 1!
+		let piece1 = piece1 as i32 + 1;
+		let piece2 = piece2 as i32 + 1;
+		self.database.execute(
+			"UPDATE puzzles SET connectivity = array_replace(connectivity, connectivity[$1], connectivity[$2]) WHERE id = $3 AND $4 < width * height AND $5 < width * height",
+			// the $6 < width * height protects against OOB access!
+			&[&piece1, &piece2, &id, &piece1, &piece2]
+		).await?;
+		Ok(())
 	}
-	async fn get_connectivity(&self, id: [u8; PUZZLE_ID_LEN]) -> Result<Vec<u16>> {
-		todo!()
+	async fn get_piece_info(&self, id: [u8; PUZZLE_ID_LEN]) -> Result<PieceInfo> {
+		let id = std::str::from_utf8(&id)?;
+		let rows = self
+			.database
+			.query(
+				"SELECT positions, connectivity FROM puzzles WHERE id = $1",
+				&[&id],
+			)
+			.await?;
+		let row = &rows[0];
+		let positions: Vec<f32> = row.try_get(0)?;
+		let connectivity: Vec<i16> = row.try_get(1)?;
+		Ok(PieceInfo {
+			positions,
+			connectivity,
+		})
 	}
-	async fn get_positions(&self, id: [u8; PUZZLE_ID_LEN]) -> Result<Vec<f32>> {
-		todo!()
-	}
-	async fn get_details(&self, id: [u8; PUZZLE_ID_LEN]) -> Result<(u8, u8, String)> {
-		todo!()
+	async fn get_puzzle_info(&self, id: [u8; PUZZLE_ID_LEN]) -> Result<PuzzleInfo> {
+		let id = std::str::from_utf8(&id)?;
+		let rows = self.database.query(
+			"SELECT width, height, url, positions, nib_types, connectivity FROM puzzles WHERE id = $1",
+			&[&id]
+		).await?;
+		let row = &rows[0];
+		let width: i32 = row.try_get(0)?;
+		let height: i32 = row.try_get(1)?;
+		let url: String = row.try_get(2)?;
+		let positions: Vec<f32> = row.try_get(3)?;
+		let nib_types: Vec<i16> = row.try_get(4)?;
+		let connectivity: Vec<i16> = row.try_get(5)?;
+		Ok(PuzzleInfo {
+			width: width as u8,
+			height: height as u8,
+			url,
+			nib_types,
+			piece_info: PieceInfo {
+				positions,
+				connectivity,
+			},
+		})
 	}
 	async fn sweep(&self) -> Result<()> {
-		todo!()
+		self.database
+			.execute(
+				"DELETE FROM puzzles WHERE create_time < current_timestamp - interval '1 week'",
+				&[],
+			)
+			.await?;
+		Ok(())
 	}
 }
 
@@ -133,19 +267,28 @@ type Result<T> = std::result::Result<T, Error>;
 
 async fn get_puzzle_info(server: &Server, id: &[u8]) -> Result<Vec<u8>> {
 	let id: [u8; PUZZLE_ID_LEN] = id.try_into().map_err(|_| Error::BadPuzzleID)?;
-	let mut data = vec![1];
-	let (width, height, url) = server.get_details(id).await?;
+	let mut data = vec![1, 0, 0, 0, 0, 0, 0, 0]; // opcode / version number and padding
+	let PuzzleInfo {
+		width,
+		height,
+		url,
+		nib_types,
+		piece_info: PieceInfo {
+			positions,
+			connectivity,
+		},
+	} = server.get_puzzle_info(id).await?;
 	data.push(width);
 	data.push(height);
+	data.extend(transmute_to_bytes(&nib_types[..]));
 	data.extend(url.as_bytes());
+	data.push(0);
 	while data.len() % 8 != 0 {
 		// padding
 		data.push(0);
 	}
-	let pieces = server.get_positions(id).await?;
-	data.extend_from_slice(pieces.as_bytes());
-	let connectivity = server.get_connectivity(id).await?;
-	data.extend_from_slice(connectivity.as_bytes());
+	data.extend_from_slice(transmute_to_bytes(&positions[..]));
+	data.extend_from_slice(transmute_to_bytes(&connectivity[..]));
 	Ok(data)
 }
 
@@ -177,12 +320,14 @@ async fn handle_websocket(
 				if url.len() > 255 {
 					return Err(Error::ImageURLTooLong);
 				}
-				if (width as u16) * (height as u16) > 1000 {
+				if usize::from(width) * usize::from(height) > MAX_PIECES {
 					return Err(Error::TooManyPieces);
 				}
-				let nib_count = 2 * (width as usize) * (height as usize) - (width as usize) - (height as usize);
+				let nib_count =
+					2 * (width as usize) * (height as usize) - (width as usize) - (height as usize);
 				let mut nib_types: Vec<u16> = Vec::with_capacity(nib_count);
-				let mut piece_positions: Vec<f32> = Vec::with_capacity((width as usize) * (height as usize) * 2);
+				let mut piece_positions: Vec<f32> =
+					Vec::with_capacity((width as usize) * (height as usize) * 2);
 				{
 					let mut rng = rand::thread_rng();
 					// pick nib types
@@ -212,7 +357,17 @@ async fn handle_websocket(
 						break;
 					}
 				}
-				server.set_puzzle_data(id, width, height, url, nib_types, piece_positions, connectivity_data).await?;
+				server
+					.set_puzzle_data(
+						id,
+						width,
+						height,
+						url,
+						nib_types,
+						piece_positions,
+						connectivity_data,
+					)
+					.await?;
 				server.player_counts.lock().await.insert(id, 1);
 				ws.send(Message::Text(format!(
 					"id: {}",
@@ -253,7 +408,7 @@ async fn handle_websocket(
 						.ok_or(Error::BadSyntax)?
 						.parse()
 						.map_err(|_| Error::BadSyntax)?;
-					server.move_piece(piece, x, y).await?;
+					server.move_piece(puzzle_id, piece, x, y).await?;
 				}
 				ws.send(Message::Text("ack".to_string())).await?;
 			} else if let Some(data) = text.strip_prefix("connect ") {
@@ -269,12 +424,16 @@ async fn handle_websocket(
 					.ok_or(Error::BadSyntax)?
 					.parse()
 					.map_err(|_| Error::BadSyntax)?;
-				server.connect_pieces(piece1, piece2).await?;
+				server.connect_pieces(puzzle_id, piece1, piece2).await?;
 			} else if text == "poll" {
 				let puzzle_id = puzzle_id.ok_or(Error::NotJoined)?;
 				let mut data = vec![2, 0, 0, 0, 0, 0, 0, 0]; // opcode / version number + padding
-				data.extend_from_slice(server.get_positions(puzzle_id).await?.as_bytes());
-				data.extend_from_slice(server.get_connectivity(puzzle_id).await?.as_bytes());
+				let PieceInfo {
+					positions,
+					connectivity,
+				} = server.get_piece_info(puzzle_id).await?;
+				data.extend_from_slice(transmute_to_bytes(&positions[..]));
+				data.extend_from_slice(transmute_to_bytes(&connectivity[..]));
 				ws.send(Message::Binary(data)).await?;
 			} else if text == "randomFeaturedWikimedia" {
 				let choice = rand::thread_rng().gen_range(0..server.wikimedia_featured.len());
@@ -367,8 +526,13 @@ async fn main() {
 		let wikimedia_featured =
 			read_to_lines("featuredpictures.txt").expect("Couldn't read featuredpictures.txt");
 		let potd = get_potd().await;
-		let (client, connection) = tokio_postgres::connect("host=/var/run/postgresql dbname=jigsaw", tokio_postgres::NoTls).await.expect("Couldn't connect to database");
-		
+		let (client, connection) = tokio_postgres::connect(
+			"host=/var/run/postgresql dbname=jigsaw",
+			tokio_postgres::NoTls,
+		)
+		.await
+		.expect("Couldn't connect to database");
+
 		// docs say: "The connection object performs the actual communication with the database, so spawn it off to run on its own."
 		tokio::spawn(async move {
 			if let Err(e) = connection.await {
@@ -382,7 +546,10 @@ async fn main() {
 			wikimedia_featured,
 		}
 	});
-	server_arc.create_table_if_not_exists().await.expect("error creating table");
+	server_arc
+		.create_table_if_not_exists()
+		.await
+		.expect("error creating table");
 	let server_arc_clone = server_arc.clone();
 	tokio::task::spawn(async move {
 		let server: &Server = server_arc_clone.as_ref();
@@ -404,8 +571,6 @@ async fn main() {
 	tokio::task::spawn(async move {
 		let server: &Server = server_arc_clone.as_ref();
 		loop {
-			// TODO : sweep
-			let now = SystemTime::now();
 			if let Err(e) = server.sweep().await {
 				eprintln!("error sweeping DB: {e}");
 			}

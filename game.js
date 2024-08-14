@@ -332,6 +332,7 @@ window.addEventListener('load', function () {
 			let dx = e.clientX - draggingPieceLastPos.x;
 			let dy = e.clientY - draggingPieceLastPos.y;
 			for (const piece of draggingPiece.connectedComponent) {
+				piece.element.style.zIndex = pieceZIndexCounter;
 				piece.element.classList.add('no-animation');
 				piece.x += dx;
 				piece.y += dy;
@@ -371,7 +372,8 @@ window.addEventListener('load', function () {
 			console.assert(puzzleWidth === data[8]);
 			console.assert(puzzleHeight === data[9]);
 		}
-		const nibTypesOffset = 10 + 8 /* timestamp - not relevant to us */;
+		console.log(data);
+		const nibTypesOffset = 10;
 		const nibTypeCount = 2 * puzzleWidth * puzzleHeight - puzzleWidth - puzzleHeight;
 		const nibTypes = new Uint16Array(payload, nibTypesOffset, nibTypeCount);
 		const imageUrlOffset = nibTypesOffset + nibTypeCount * 2;
