@@ -35,7 +35,18 @@ struct Server {
 
 impl Server {
 	async fn create_table_if_not_exists(&self) -> Result<()> {
-		todo!()
+		if self.database.query("SELECT FROM puzzles", &[]).await.is_ok() {
+			return Ok(());
+		} else {
+			self.database.execute("CREATE TABLE puzzles (
+				id char($1) PRIMARY KEY,
+				url varchar(256),
+				create_time timestamp,
+				connectivity int2[],
+				positions float4[]
+			)", &[&(PUZZLE_ID_LEN as i32)]).await?;
+			return Ok(());
+		}
 	}
 	async fn try_register_id(&self, id: [u8; PUZZLE_ID_LEN]) -> Result<bool> {
 		todo!()

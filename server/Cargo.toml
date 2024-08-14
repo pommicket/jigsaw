@@ -7,7 +7,7 @@ edition = "2021"
 futures-util = "0.3"
 rand = { version = "0.8.5", features = ["std", "std_rng"] }
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread", "net", "io-util", "sync", "time", "process"] }
-tokio-postgres = "0.7.11"
+tokio-postgres = { version = "0.7.11", features = ["array-impls"] }
 tokio-tungstenite = "0.23.1"
 tungstenite = "0.23.0"
 zerocopy = "0.7.35"
