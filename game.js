@@ -372,7 +372,6 @@ window.addEventListener('load', function () {
 			console.assert(puzzleWidth === data[8]);
 			console.assert(puzzleHeight === data[9]);
 		}
-		console.log(data);
 		const nibTypesOffset = 10;
 		const nibTypeCount = 2 * puzzleWidth * puzzleHeight - puzzleWidth - puzzleHeight;
 		const nibTypes = new Uint16Array(payload, nibTypesOffset, nibTypeCount);

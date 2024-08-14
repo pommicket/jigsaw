@@ -9,9 +9,19 @@
 	<link rel="stylesheet" href="style.css">
 	<script src="index.js"></script>
 </head>
-<body>
-	<button id="host">host</button>
-	<input id="code" type="text">
-	<button id="join">join</button>
+<body class="margined">
+	<h3>jigsaw</h3>
+	<form id="host-form" method="dialog" action="#">
+		<div class="form-line"><label><input type="number" min="10" max="1000" name="pieces" value="100"> 🧩 Number of pieces</label></div>
+		<div class="form-line">
+			<fieldset>
+				<legend>Choose your image…</legend>
+				<label><input name="image" type="radio" value="custom" id="custom-image" checked>Custom image URL</label> <input type="text" id="image-url" name="image-url" placeholder="Enter image URL..."><br>
+				<label><input name="image" type="radio" value="randomFeaturedWikimedia">Random featured Wikimedia Commons image</label><br>
+				<label><input name="image" type="radio" value="wikimediaPotd">Wikimedia Commons Picture of the Day</label><br>
+			</fieldset>
+		</div>
+		<input value="Host puzzle" type="submit">
+	</form>
 </body>
 </html>

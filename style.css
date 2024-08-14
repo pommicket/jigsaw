@@ -8,6 +8,13 @@ body {
 	margin: 0;
 	position: relative;
 }
+body.margined {
+	margin: 0.5em;
+}
+.form-line {
+	display: block;
+	margin: 0.5em 0;
+}
 
 #header {
 	height: 1.5em;
@@ -19,6 +26,10 @@ body {
 a, a:visited {
 	color: #08a;
 	text-decoration: none;
+}
+
+#header a {
+	padding: 0 0.5em;
 }
 
 #play-area {

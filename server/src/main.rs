@@ -369,9 +369,10 @@ async fn handle_websocket(
 					)
 					.await?;
 				server.player_counts.lock().await.insert(id, 1);
+				*puzzle_id = Some(id);
 				ws.send(Message::Text(format!(
 					"id: {}",
-					std::str::from_utf8(&id).expect("puzzle ID has bad utf-8???")
+					std::str::from_utf8(&id)?
 				)))
 				.await?;
 				let info = get_puzzle_info(server, &id).await?;
@@ -577,6 +578,7 @@ async fn main() {
 			tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
 		}
 	});
+	println!("Server initialized! Waiting for connections...");
 	loop {
 		let (mut stream, addr) = match listener.accept().await {
 			Ok(result) => result,
