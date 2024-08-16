@@ -58,7 +58,7 @@ impl Server {
 					&format!(
 						"CREATE TABLE puzzles (
 				id char({PUZZLE_ID_LEN}) PRIMARY KEY,
-				url varchar(256),
+				url text,
 				width int4,
 				height int4,
 				create_time timestamp DEFAULT CURRENT_TIMESTAMP,
@@ -88,7 +88,7 @@ impl Server {
 		height: u8,
 		url: &str,
 		nib_types: Vec<u16>,
-		piece_positions: Vec<f32>,
+		piece_positions: &[f32],
 		connectivity: Vec<u16>,
 	) -> Result<()> {
 		let id = std::str::from_utf8(&id)?;
@@ -317,7 +317,7 @@ async fn handle_websocket(
 					.parse()
 					.map_err(|_| Error::BadSyntax)?;
 				let url: String = parts.next().ok_or(Error::BadSyntax)?.replace(';', " ");
-				if url.len() > 255 {
+				if url.len() > 2048 {
 					return Err(Error::ImageURLTooLong);
 				}
 				if usize::from(width) * usize::from(height) > MAX_PIECES {
@@ -326,8 +326,8 @@ async fn handle_websocket(
 				let nib_count =
 					2 * (width as usize) * (height as usize) - (width as usize) - (height as usize);
 				let mut nib_types: Vec<u16> = Vec::with_capacity(nib_count);
-				let mut piece_positions: Vec<f32> =
-					Vec::with_capacity((width as usize) * (height as usize) * 2);
+				let mut piece_positions: Vec<[f32; 2]> =
+					Vec::with_capacity((width as usize) * (height as usize));
 				{
 					let mut rng = rand::thread_rng();
 					// pick nib types
@@ -337,10 +337,12 @@ async fn handle_websocket(
 					// pick piece positions
 					for y in 0..(height as u16) {
 						for x in 0..(width as u16) {
-							let dx: f32 = rng.gen_range(0.0..0.5);
-							let dy: f32 = rng.gen_range(0.0..0.5);
-							piece_positions.push((x as f32 + dx) / ((width + 1) as f32));
-							piece_positions.push((y as f32 + dy) / ((height + 1) as f32));
+							let dx: f32 = rng.gen_range(0.0..0.3);
+							let dy: f32 = rng.gen_range(0.0..0.3);
+							piece_positions.push([
+								(x as f32 + dx) / ((width + 1) as f32),
+								(y as f32 + dy) / ((height + 1) as f32),
+							]);
 						}
 					}
 					piece_positions.shuffle(&mut rng);
@@ -364,7 +366,7 @@ async fn handle_websocket(
 						height,
 						&url,
 						nib_types,
-						piece_positions,
+						piece_positions.as_flattened(),
 						connectivity_data,
 					)
 					.await?;

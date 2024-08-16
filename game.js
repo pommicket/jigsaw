@@ -347,16 +347,17 @@ window.addEventListener('load', function () {
 			draggingPieceLastPos.y = e.clientY;
 		}
 	});
-	async function loadImage() {
+	function loadImage() {
 		document.body.style.setProperty('--image', `url("${imageUrl}")`);
 		imageLinkElement.style.visibility = 'visible';
 		imageLinkElement.href = imageLink;
-		image.src = imageUrl;
-		await new Promise((resolve) => {
+		const promise = new Promise((resolve) => {
 			image.addEventListener('load', function () {
 				resolve();
 			});
 		});
+		image.src = imageUrl;
+		return promise;
 	}
 	function updateConnectivity(connectivity) {
 		console.assert(connectivity.length === pieces.length);

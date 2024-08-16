@@ -25,7 +25,7 @@ def get_urls_of_images(images):
 			time.sleep(5)
 		break
 	response = json.loads(response.text)
-	return [page['imageinfo'][0]['url'] for page in response['query']['pages'].values()]
+	return {page['title']: page['imageinfo'][0]['url'] for page in response['query']['pages'].values()}
 	
 def get_featured_files():
 	with open('featuredpictures_files.txt', 'w') as f:
@@ -51,25 +51,13 @@ def get_featured_files():
 def get_featured_urls():
 	with open('featuredpictures_files.txt', 'r') as f:
 		files = [line.strip() for line in f]
-	with open('featuredpictures_urls.txt', 'w') as f:
+	with open('featuredpictures.txt', 'w') as f:
 		for i in range(0, len(files), 30):
 			print('got URLs for',i,'files')
 			batch = files[i:min(len(files), i + 30)]
-			urls = get_urls(batch)
-			f.write(''.join(url + '\n' for url in urls))
+			urls = get_urls_of_images(batch)
+			f.write(''.join(f'{urls[x]} https://commons.wikimedia.org/wiki/{quote(x)}\n' for x in batch))
 
-def combine():
-	with open('featuredpictures_files.txt', 'r') as f:
-		files = [line.strip() for line in f]
-	with open('featuredpictures_urls.txt', 'r') as f:
-		urls = [line.strip() for line in f]
-	assert all(urls)
-	assert all(files)
-	assert len(files) == len(urls)
-	with open('featuredpictures.txt', 'w') as out:
-		for f, u in zip(files, urls):
-			out.write(f'{u} https://commons.wikimedia.org/wiki/{quote(f)}\n')
 if __name__ == '__main__':
 	get_featured_files()
 	get_featured_urls()
-	combine()
