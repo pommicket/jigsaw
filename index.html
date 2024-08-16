@@ -2,12 +2,19 @@
 <html lang="en">
 
 <head>
+	<script>
+	if(location.protocol.startsWith('http') &&
+	!location.pathname.endsWith('/') &&
+	!location.pathname.endsWith('.html')) {
+	location.pathname += '/index.html';
+}
+	</script>
 	<title>jigsaw</title>
 	<meta charset="utf-8">
 	<meta content="width=device-width,initial-scale=1" name="viewport">
-	<link rel="icon" href="favicon.ico">
+	<link rel="icon" href="favicon.png">
 	<link rel="stylesheet" href="style.css">
-	<script src="index.js"></script>
+	<script src="index.js?v=3"></script>
 </head>
 <body class="margined">
 	<h3>jigsaw</h3>

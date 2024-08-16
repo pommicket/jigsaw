@@ -6,7 +6,7 @@
 RCLONE_DEST=${RCLONE_DEST:-linode:/s.pommicket.com/jigsaw}
 # server user+hostname
 REMOTE=${REMOTE:-jigsaw@pommicket.com}
-for file in *.html *.js *.css *.mp3; do
+for file in *.html *.js *.css *.mp3 favicon.png; do
 	echo "upload $file"
 	rclone copy --s3-acl=public-read $file $RCLONE_DEST || exit 1
 done
