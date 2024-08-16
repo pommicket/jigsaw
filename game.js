@@ -387,7 +387,9 @@ window.addEventListener('load', function () {
 		const connectivityOffset = piecePositionsOffset + piecePositions.length * 4;
 		const connectivity = new Uint16Array(payload, connectivityOffset, puzzleWidth * puzzleHeight);
 		if (joinPuzzle) {
-			imageUrl = new TextDecoder().decode(imageUrlBytes);
+			const parts = new TextDecoder().decode(imageUrlBytes).split(' ');
+			imageUrl = parts[0];
+			imageLink = parts.length > 1 ? parts[1] : parts[0];
 			await loadImage();
 		}
 		let nibTypeIndex = 0;
@@ -500,7 +502,7 @@ window.addEventListener('load', function () {
 		}
 		puzzleWidth = bestWidth;
 		puzzleHeight = heightFromWidth(puzzleWidth);
-		socket.send(`new ${puzzleWidth} ${puzzleHeight} ${imageUrl}`);
+		socket.send(`new ${puzzleWidth} ${puzzleHeight} ${imageUrl};${imageLink}`);
 	}
 	let waitingForServerToGiveUsImageUrl = false;
 	socket.addEventListener('open', async () => {

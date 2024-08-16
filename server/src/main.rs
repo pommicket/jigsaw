@@ -316,7 +316,7 @@ async fn handle_websocket(
 					.ok_or(Error::BadSyntax)?
 					.parse()
 					.map_err(|_| Error::BadSyntax)?;
-				let url: &str = parts.next().ok_or(Error::BadSyntax)?;
+				let url: String = parts.next().ok_or(Error::BadSyntax)?.replace(';', " ");
 				if url.len() > 255 {
 					return Err(Error::ImageURLTooLong);
 				}
@@ -362,7 +362,7 @@ async fn handle_websocket(
 						id,
 						width,
 						height,
-						url,
+						&url,
 						nib_types,
 						piece_positions,
 						connectivity_data,
@@ -370,11 +370,8 @@ async fn handle_websocket(
 					.await?;
 				server.player_counts.lock().await.insert(id, 1);
 				*puzzle_id = Some(id);
-				ws.send(Message::Text(format!(
-					"id: {}",
-					std::str::from_utf8(&id)?
-				)))
-				.await?;
+				ws.send(Message::Text(format!("id: {}", std::str::from_utf8(&id)?)))
+					.await?;
 				let info = get_puzzle_info(server, &id).await?;
 				ws.send(Message::Binary(info)).await?;
 			} else if let Some(id) = text.strip_prefix("join ") {
