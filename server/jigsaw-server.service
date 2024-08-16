@@ -1,0 +1,14 @@
+[Unit]
+Description=Jigsaw puzzle server
+After=network.target
+
+[Service]
+User=jigsaw
+WorkingDirectory=/home/jigsaw/server
+ExecStart=/home/jigsaw/server/jigsaw-server
+Type=simple
+Restart=always
+
+[Install]
+WantedBy=default.target
+RequiredBy=network.target

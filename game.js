@@ -535,7 +535,6 @@ window.addEventListener('load', function () {
 				const parts = e.data.substring('useImage '.length).split(' ');
 				imageUrl = parts[0];
 				imageLink = parts.length > 1 ? parts[1] : imageUrl;
-				console.log(imageUrl);
 				hostPuzzle();
 			} else if (e.data.startsWith('error ')) {
 				const error = e.data.substring('error '.length);
