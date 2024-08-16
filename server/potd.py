@@ -14,6 +14,8 @@ item = xml.findall('channel/item')[-1]
 desc = item.find('description').text
 start = desc.index('"/wiki/File:') + len('"/wiki/')
 end = desc.index('"', start)
-name = unquote(desc[start:end])
+name_escaped = desc[start:end]
+name = unquote(name_escaped)
 url = get_urls_of_images([name])[0]
-print(url)
+link = f'https://commons.wikimedia.org/wiki/{name_escaped}'
+print(url, link)

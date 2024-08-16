@@ -3,13 +3,17 @@ window.addEventListener('load', function () {
 	const socket = new WebSocket(location.protocol === "file:" || location.hostname === "localhost" ? "ws://localhost:54472" : "wss://jigsaw.pommicket.com");
 	const searchParams = new URL(location.href).searchParams;
 	socket.binaryType = "arraybuffer";
+	// direct URL to image file
 	let imageUrl = searchParams.has('image') ? encodeURI(searchParams.get('image')) : undefined;
+	// link to page with info about image (e.g. https://commons.wikimedia.org/wiki/File:Foo.jpg)
+	let imageLink = imageUrl;
 	let puzzleWidth, puzzleHeight;
 	const roughPieceCount = parseInt(searchParams.get('pieces'));
 	const getById = (id) => document.getElementById(id);
 	const playArea = getById("play-area");
 	const connectAudio = getById("connect-audio");
 	const solveAudio = getById("solve-audio");
+	const imageLinkElement = getById('image-link');
 	const joinPuzzle = searchParams.get('join');
 	const joinLink = getById('join-link');
 	function setJoinLink(puzzleID) {
@@ -345,9 +349,8 @@ window.addEventListener('load', function () {
 	});
 	async function loadImage() {
 		document.body.style.setProperty('--image', `url("${imageUrl}")`);
-		const imageLink = getById('image-link');
-		imageLink.style.visibility = 'visible';
-		imageLink.href = imageUrl;
+		imageLinkElement.style.visibility = 'visible';
+		imageLinkElement.href = imageLink;
 		image.src = imageUrl;
 		await new Promise((resolve) => {
 			image.addEventListener('load', function () {
@@ -529,7 +532,10 @@ window.addEventListener('load', function () {
 				receivedAck = true;
 			} else if (waitingForServerToGiveUsImageUrl && e.data.startsWith('useImage ')) {
 				waitingForServerToGiveUsImageUrl = false;
-				imageUrl = e.data.substring('useImage '.length);
+				const parts = e.data.substring('useImage '.length).split(' ');
+				imageUrl = parts[0];
+				imageLink = parts.length > 1 ? parts[1] : imageUrl;
+				console.log(imageUrl);
 				hostPuzzle();
 			} else if (e.data.startsWith('error ')) {
 				const error = e.data.substring('error '.length);

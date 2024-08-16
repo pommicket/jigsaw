@@ -1,5 +1,4 @@
 - single player mode with no server
 - congratualations
 - handle server errors on the client side
-- link to wikimedia File: page rather than image
 - let user select piece size
