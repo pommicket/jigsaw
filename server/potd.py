@@ -16,6 +16,6 @@ start = desc.index('"/wiki/File:') + len('"/wiki/')
 end = desc.index('"', start)
 name_escaped = desc[start:end]
 name = unquote(name_escaped)
-url = get_urls_of_images([name])[name]
+url = list(get_urls_of_images([name]).values())[0]
 link = f'https://commons.wikimedia.org/wiki/{name_escaped}'
 print(url, link)
