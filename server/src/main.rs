@@ -291,6 +291,7 @@ async fn handle_websocket(
 	puzzle_id: &mut Option<[u8; PUZZLE_ID_LEN]>,
 	ws: &mut tokio_tungstenite::WebSocketStream<&mut tokio::net::TcpStream>,
 ) -> Result<()> {
+	let mut last_poll_hash = 0u64;
 	while let Some(message) = ws.next().await {
 		let message = message?;
 		if matches!(message, Message::Close(_)) {
@@ -421,14 +422,25 @@ async fn handle_websocket(
 				server.connect_pieces(puzzle_id, piece1, piece2).await?;
 			} else if text == "poll" {
 				let puzzle_id = puzzle_id.ok_or(Error::NotJoined)?;
-				let mut data = vec![2, 0, 0, 0, 0, 0, 0, 0]; // opcode / version number + padding
 				let PieceInfo {
 					positions,
 					connectivity,
 				} = server.get_piece_info(puzzle_id).await?;
-				data.extend_from_slice(transmute_to_bytes(&positions[..]));
-				data.extend_from_slice(transmute_to_bytes(&connectivity[..]));
-				ws.send(Message::Binary(data)).await?;
+				let mut hasher = std::hash::DefaultHasher::new();
+				let positions_bytes = transmute_to_bytes(&positions[..]);
+				let connectivity_bytes = transmute_to_bytes(&connectivity[..]);
+				use std::hash::Hasher;
+				hasher.write(positions_bytes);
+				hasher.write(connectivity_bytes);
+				let hash = hasher.finish();
+				if hash != last_poll_hash {
+					// don't send update if nothing's changed
+					last_poll_hash = hash;
+					let mut data = vec![2, 0, 0, 0, 0, 0, 0, 0]; // opcode / version number + padding
+					data.extend_from_slice(positions_bytes);
+					data.extend_from_slice(connectivity_bytes);
+					ws.send(Message::Binary(data)).await?;
+				}
 			} else if text == "randomFeaturedWikimedia" {
 				let choice = rand::thread_rng().gen_range(0..server.wikimedia_featured.len());
 				ws.send(Message::Text(format!(
