@@ -1,4 +1,5 @@
 #![allow(clippy::too_many_arguments)]
+#![allow(clippy::manual_range_contains)]
 
 use futures_util::{SinkExt, StreamExt};
 use rand::seq::SliceRandom;
@@ -318,8 +319,8 @@ async fn handle_websocket(
 				if usize::from(width) * usize::from(height) > MAX_PIECES {
 					return Err(Error::TooManyPieces);
 				}
-				let nib_count =
-					2 * (width as usize) * (height as usize) - (width as usize) - (height as usize);
+				let nib_count = 2 * usize::from(width) * usize::from(height)
+					- usize::from(width) - usize::from(height);
 				let mut nib_types: Vec<u16> = Vec::with_capacity(nib_count);
 				let mut piece_positions: Vec<[f32; 2]> =
 					Vec::with_capacity((width as usize) * (height as usize));
@@ -330,21 +331,21 @@ async fn handle_websocket(
 						nib_types.push(rng.gen());
 					}
 					// pick piece positions
-					for y in 0..(height as u16) {
-						for x in 0..(width as u16) {
+					for y in 0..u16::from(height) {
+						for x in 0..u16::from(width) {
 							let dx: f32 = rng.gen_range(0.0..0.3);
 							let dy: f32 = rng.gen_range(0.0..0.3);
 							piece_positions.push([
-								(x as f32 + dx) / ((width + 1) as f32),
-								(y as f32 + dy) / ((height + 1) as f32),
+								(f32::from(x) + dx) / (f32::from(width) + 1.0),
+								(f32::from(y) + dy) / (f32::from(height) + 1.0),
 							]);
 						}
 					}
 					piece_positions.shuffle(&mut rng);
 				}
 				let mut connectivity_data: Vec<u16> =
-					Vec::with_capacity((width as usize) * (height as usize));
-				for i in 0..(width as u16) * (height as u16) {
+					Vec::with_capacity(usize::from(width) * usize::from(height));
+				for i in 0..u16::from(width) * u16::from(height) {
 					connectivity_data.push(i);
 				}
 				let mut id;
@@ -403,6 +404,11 @@ async fn handle_websocket(
 						.ok_or(Error::BadSyntax)?
 						.parse()
 						.map_err(|_| Error::BadSyntax)?;
+					for coord in [x, y] {
+						if !coord.is_finite() || coord < -1.0 || coord > 2.0 {
+							return Err(Error::BadSyntax);
+						}
+					}
 					server.move_piece(puzzle_id, piece, x, y).await?;
 				}
 				ws.send(Message::Text("ack".to_string())).await?;

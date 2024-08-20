@@ -212,7 +212,7 @@ window.addEventListener('load', function () {
 		element;
 		nibTypes;
 		connectedComponent;
-		upToDateWithServer;
+		needsServerUpdate;
 		getClipPath() {
 			const nibTypes = this.nibTypes;
 			let shoulderWidth = (pieceWidth - nibSize) / 2;
@@ -247,7 +247,7 @@ window.addEventListener('load', function () {
 			this.y = y;
 			this.u = u;
 			this.v = v;
-			this.upToDateWithServer = true;
+			this.needsServerUpdate = false;
 			this.connectedComponent = [this];
 			const element = this.element = document.createElement('div');
 			element.classList.add('piece');
@@ -300,6 +300,7 @@ window.addEventListener('load', function () {
 				piece.element.classList.remove('no-animation');
 				piece.element.style.zIndex = pieceZIndexCounter;
 				if (solved) break;
+				piece.needsServerUpdate = true;
 				const col = piece.col();
 				const row = piece.row();
 				const bbox = piece.boundingBox();
@@ -341,7 +342,6 @@ window.addEventListener('load', function () {
 				piece.x += dx;
 				piece.y += dy;
 				piece.updatePosition();
-				piece.upToDateWithServer = false;
 			}
 			draggingPieceLastPos.x = e.clientX;
 			draggingPieceLastPos.y = e.clientY;
@@ -445,7 +445,7 @@ window.addEventListener('load', function () {
 			// only receive the position of one piece per equivalence class mod is-connected-to
 			if (connectivity[i] !== i) continue;
 			const piece = pieces[i];
-			if (!piece.upToDateWithServer) continue;
+			if (piece.needsServerUpdate) continue;
 			if (draggingPiece && draggingPiece.connectedComponent === piece.connectedComponent) continue;
 			const newPos = canonicalToScreenPos({x: piecePositions[2*i], y: piecePositions[2*i+1]});
 			const diff = [newPos.x - piece.x, newPos.y - piece.y];
@@ -468,7 +468,7 @@ window.addEventListener('load', function () {
 		if (!receivedAck) return; // last update hasn't been acknowledged yet
 		const motions = [];
 		for (const piece of pieces) {
-			if (piece.upToDateWithServer) continue;
+			if (!piece.needsServerUpdate) continue;
 			const canonicalPos = screenPosToCanonical({
 				x: piece.x,
 				y: piece.y,
@@ -530,7 +530,7 @@ window.addEventListener('load', function () {
 				setJoinLink(puzzleID);
 			} else if (e.data === 'ack') {
 				for (const piece of pieces) {
-					piece.upToDateWithServer = true;
+					piece.needsServerUpdate = false;
 				}
 				receivedAck = true;
 			} else if (waitingForServerToGiveUsImageUrl && e.data.startsWith('useImage ')) {
