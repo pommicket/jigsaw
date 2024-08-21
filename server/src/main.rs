@@ -613,7 +613,10 @@ async fn main() {
 		}
 		let mut last_time = start_time;
 		loop {
-			let time_to_sleep = next_day(last_time).duration_since(last_time).unwrap();
+			// sleep for a little longer to make sure new PotD is available
+			let extra_sleep = Duration::from_secs(60);
+			let time_to_sleep =
+				next_day(last_time).duration_since(last_time).unwrap() + extra_sleep;
 			tokio::time::sleep(time_to_sleep).await;
 			let potd = get_potd().await;
 			*server.wikimedia_potd.write().await = potd;
