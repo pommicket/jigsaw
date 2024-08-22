@@ -405,7 +405,7 @@ async fn handle_websocket(
 						.parse()
 						.map_err(|_| Error::BadSyntax)?;
 					for coord in [x, y] {
-						if !coord.is_finite() || coord < -1.0 || coord > 2.0 {
+						if !coord.is_finite() || coord < 0.0 || coord > 2.0 {
 							return Err(Error::BadSyntax);
 						}
 					}
@@ -576,7 +576,7 @@ async fn main() {
 			&[Type::INT4, Type::FLOAT4, Type::INT4, Type::FLOAT4, Type::BPCHAR, Type::INT4])
 			.await.expect("couldn't prepare move_piece statement");
 		let connect_pieces = client.prepare_typed(
-			"UPDATE puzzles SET connectivity = array_replace(connectivity, connectivity[$1], connectivity[$2]) WHERE id = $3 AND $1 < width * height AND $2 < width * height",
+			"UPDATE puzzles SET connectivity = array_replace(connectivity, connectivity[$1], connectivity[$2]) WHERE id = $3 AND $1 <= width * height AND $2 <= width * height",
 			&[Type::INT4, Type::INT4, Type::BPCHAR])
 			.await.expect("couldn't prepare connect_pieces statement");
 		let get_piece_info = client

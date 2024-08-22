@@ -60,14 +60,14 @@ window.addEventListener('load', function () {
 	}
 	function canonicalToScreenPos(canonical) {
 		return {
-			x: canonical.x * (playArea.clientWidth - pieceWidth - 2 * nibSize),
-			y: canonical.y  * (playArea.clientHeight - pieceHeight - 2 * nibSize),
+			x: canonical.x * playArea.clientWidth,
+			y: canonical.y  * playArea.clientHeight,
 		};
 	}
 	function screenPosToCanonical(scr) {
 		return {
-			x: scr.x / (playArea.clientWidth - pieceWidth - 2 * nibSize),
-			y: scr.y / (playArea.clientHeight - pieceHeight - 2 * nibSize),
+			x: scr.x / playArea.clientWidth,
+			y: scr.y / playArea.clientHeight,
 		};
 	}
 	function random() {
@@ -120,8 +120,8 @@ window.addEventListener('load', function () {
 			piece.connectedComponent = piece1.connectedComponent;
 			const row = piece.row();
 			const col = piece.col();
-			piece.x = (col - piece1Col) * pieceWidth + piece1.x;
-			piece.y = (row - piece1Row) * pieceHeight + piece1.y;
+			piece.x = (col - piece1Col) * pieceWidth / playArea.clientWidth + piece1.x;
+			piece.y = (row - piece1Row) * pieceHeight / playArea.clientHeight + piece1.y;
 			piece.updatePosition();
 		}
 		if (!solved && piece1.connectedComponent.length === puzzleWidth * puzzleHeight) {
@@ -260,6 +260,7 @@ window.addEventListener('load', function () {
 				this.style.zIndex = ++pieceZIndexCounter;
 				this.style.cursor = 'none';
 			});
+			element.style.zIndex = 0; // default zIndex
 			this.updateUV();
 			this.updatePosition();
 			this.nibTypes = nibTypes;
@@ -284,12 +285,13 @@ window.addEventListener('load', function () {
 			return Math.floor(this.id / puzzleWidth);
 		}
 		updatePosition() {
-			this.element.style.left = this.x + 'px';
-			this.element.style.top = this.y + 'px';
+			this.element.style.left = (100 * this.x) + '%';
+			this.element.style.top = (100 * this.y) + '%';
 		}
 		boundingBox() {
+			const pos = canonicalToScreenPos(this);
 			return Object.preventExtensions({
-				left: this.x, top: this.y, right: this.x + pieceWidth + 2 * nibSize, bottom: this.y + pieceHeight + 2 * nibSize
+				left: pos.x, top: pos.y, right: pos.x + pieceWidth + 2 * nibSize, bottom: pos.y + pieceHeight + 2 * nibSize
 			});
 		}
 	}
@@ -334,8 +336,16 @@ window.addEventListener('load', function () {
 	});
 	window.addEventListener('mousemove', function(e) {
 		if (draggingPiece) {
-			let dx = e.clientX - draggingPieceLastPos.x;
-			let dy = e.clientY - draggingPieceLastPos.y;
+			let dx = (e.clientX - draggingPieceLastPos.x) / playArea.clientWidth;
+			let dy = (e.clientY - draggingPieceLastPos.y) / playArea.clientHeight;
+			for (const piece of draggingPiece.connectedComponent) {
+				// ensure pieces don't go past left edge
+				dx = Math.max(dx, 0.001 - piece.x);
+				dy = Math.max(dy, 0.001 - piece.y);
+				// ensure pieces don't go past right edge
+				dx = Math.min(dx, 1.5 - piece.x);
+				dy = Math.min(dy, 1.5 - piece.y);
+			}
 			for (const piece of draggingPiece.connectedComponent) {
 				piece.element.style.zIndex = pieceZIndexCounter;
 				piece.element.classList.add('no-animation');
@@ -425,17 +435,12 @@ window.addEventListener('load', function () {
 			}
 		}
 		console.assert(nibTypeIndex === nibTypeCount);
-		updateConnectivity(connectivity);
 		for (let id = 0; id < pieces.length; id++) {
-			const canonicalPos = {
-				x: piecePositions[2 * connectivity[id]],
-				y: piecePositions[2 * connectivity[id] + 1]
-			};
-			const screenPos = canonicalToScreenPos(canonicalPos);
-			pieces[id].x = screenPos.x + pieceWidth * (pieces[id].col() - pieces[connectivity[id]].col());
-			pieces[id].y = screenPos.y + pieceHeight * (pieces[id].row() - pieces[connectivity[id]].row());
+			pieces[id].x = piecePositions[2 * connectivity[id]];
+			pieces[id].y = piecePositions[2 * connectivity[id] + 1];
 			pieces[id].updatePosition();
 		}
+		updateConnectivity(connectivity);
 	}
 	function applyUpdate(update) {
 		const piecePositions = new Float32Array(update, 8, puzzleWidth * puzzleHeight * 2);
@@ -447,9 +452,9 @@ window.addEventListener('load', function () {
 			const piece = pieces[i];
 			if (piece.needsServerUpdate) continue;
 			if (draggingPiece && draggingPiece.connectedComponent === piece.connectedComponent) continue;
-			const newPos = canonicalToScreenPos({x: piecePositions[2*i], y: piecePositions[2*i+1]});
+			const newPos = {x: piecePositions[2 * i], y: piecePositions[2 * i + 1]};
 			const diff = [newPos.x - piece.x, newPos.y - piece.y];
-			const minRadius = 10; // don't bother moving less than 10px
+			const minRadius = 0.01; // don't bother moving less than 1%
 			if (diff[0] * diff[0] + diff[1] * diff[1] < minRadius * minRadius) continue;
 			piece.x = newPos.x;
 			piece.y = newPos.y;
@@ -457,8 +462,8 @@ window.addEventListener('load', function () {
 			// derive all other pieces' position in this connected component from piece.
 			for (const other of piece.connectedComponent) {
 				if (other === piece) continue;
-				other.x = piece.x + (other.col() - piece.col()) * pieceWidth;
-				other.y = piece.y + (other.row() - piece.row()) * pieceHeight;
+				other.x = piece.x + (other.col() - piece.col()) * pieceWidth / playArea.clientWidth;
+				other.y = piece.y + (other.row() - piece.row()) * pieceHeight / playArea.clientHeight;
 				other.updatePosition();
 			}
 		}
@@ -469,11 +474,7 @@ window.addEventListener('load', function () {
 		const motions = [];
 		for (const piece of pieces) {
 			if (!piece.needsServerUpdate) continue;
-			const canonicalPos = screenPosToCanonical({
-				x: piece.x,
-				y: piece.y,
-			});
-			motions.push(`move ${piece.id} ${canonicalPos.x} ${canonicalPos.y}`);
+			motions.push(`move ${piece.id} ${piece.x} ${piece.y}`);
 		}
 		if (motions.length) {
 			receivedAck = false;
