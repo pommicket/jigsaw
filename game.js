@@ -70,6 +70,24 @@ window.addEventListener('load', function () {
 			y: scr.y / playArea.clientHeight,
 		};
 	}
+	function deriveConnectedPiecePositions() {
+		for (const piece of pieces) {
+			piece.deriveConnectedPiecePositions();
+		}
+	}
+	function setPieceSize(w, h) {
+		pieceWidth = w;
+		pieceHeight = h;
+		nibSize = Math.min(pieceWidth / 4, pieceHeight / 4);
+		for (const piece of pieces)
+			piece.updatePieceSize();
+		deriveConnectedPiecePositions();
+		document.body.style.setProperty('--piece-width', (pieceWidth) + 'px');
+		document.body.style.setProperty('--piece-height', (pieceHeight) + 'px');
+		document.body.style.setProperty('--nib-size', (nibSize) + 'px');
+		document.body.style.setProperty('--image-width', (pieceWidth * puzzleWidth) + 'px');
+		document.body.style.setProperty('--image-height', (pieceHeight * puzzleHeight) + 'px');
+	}
 	function random() {
 		// https://en.wikipedia.org/wiki/Linear_congruential_generator
 		// this uses the "Microsoft Visual/Quick C/C++" constants because
@@ -102,28 +120,23 @@ window.addEventListener('load', function () {
 		}
 		console.assert(false);
 	}
-	function connectPieces(piece1, piece2) {
+	function connectPieces(piece1, piece2, interactive) {
 		if (piece1.connectedComponent === piece2.connectedComponent) return false;
-		if (piece1.connectedComponent.length < piece2.connectedComponent.length) {
+		if (interactive && piece1.connectedComponent.length < piece2.connectedComponent.length) {
 			// always connect the smaller component to the larger component
-			return connectPieces(piece2, piece1);
+			return connectPieces(piece2, piece1, interactive);
 		}
 		piece1.connectedComponent.push(...piece2.connectedComponent);
 		const maxZIndex = Math.max(...piece1.connectedComponent.map((x) => parseInt(x.element.style.zIndex)));
+		for (const piece of piece2.connectedComponent) {
+			piece.connectedComponent = piece1.connectedComponent;
+		}
 		for (const piece of piece1.connectedComponent) {
 			// update z-index to max in connected component
 			piece.element.style.zIndex = maxZIndex;
 		}
-		let piece1Col = piece1.col();
-		let piece1Row = piece1.row();
-		for (const piece of piece2.connectedComponent) {
-			piece.connectedComponent = piece1.connectedComponent;
-			const row = piece.row();
-			const col = piece.col();
-			piece.x = (col - piece1Col) * pieceWidth / playArea.clientWidth + piece1.x;
-			piece.y = (row - piece1Row) * pieceHeight / playArea.clientHeight + piece1.y;
-			piece.updatePosition();
-		}
+		if (interactive)
+			deriveConnectedPiecePositions();
 		if (!solved && piece1.connectedComponent.length === puzzleWidth * puzzleHeight) {
 			solveAudio.play();
 			solved = true;
@@ -162,13 +175,13 @@ window.addEventListener('load', function () {
 		}
 		randomize() {
 			const bendiness = 0.5;
-			this.dx11 = Math.floor((random() *  2 - 1)  * nibSize * bendiness);
-			this.dy11 = Math.floor((random() * 2 - 1) * nibSize * bendiness);
-			this.dx12 = Math.floor((random() *  2 - 1) * nibSize * bendiness);
+			this.dx11 = (random() *  2 - 1) * bendiness;
+			this.dy11 = (random() * 2 - 1) * bendiness;
+			this.dx12 = (random() *  2 - 1) * bendiness;
 			// this ensures base of nib is flat
-			this.dy12 = nibSize;
-			this.dx22 = Math.floor((random() *  2 - 1) * nibSize * bendiness);
-			this.dy22 = Math.floor((random() * 2 - 1) * nibSize * bendiness);
+			this.dy12 = 1;
+			this.dx22 = (random() *  2 - 1) * bendiness;
+			this.dy22 = (random() * 2 - 1) * bendiness;
 			return this;
 		}
 		static random(orientation) {
@@ -176,19 +189,19 @@ window.addEventListener('load', function () {
 		}
 		path() {
 			let xMul = this.orientation === BOTTOM_IN || this.orientation === LEFT_IN
-				|| this.orientation === BOTTOM_OUT || this.orientation === LEFT_OUT ? -1 : 1;
+				|| this.orientation === BOTTOM_OUT || this.orientation === LEFT_OUT ? -nibSize : nibSize;
 			let yMul = this.orientation === RIGHT_IN || this.orientation === BOTTOM_IN
-				|| this.orientation === TOP_OUT || this.orientation === LEFT_OUT ? -1 : 1;
+				|| this.orientation === TOP_OUT || this.orientation === LEFT_OUT ? -nibSize : nibSize;
 			let dx11 = this.dx11 * xMul;
-			let dy11 = (nibSize / 2 + this.dy11) * yMul;
+			let dy11 = (1 / 2 + this.dy11) * yMul;
 			let dx12 = this.dx12 * xMul;
 			let dy12 = this.dy12 * yMul;
-			let dx22 = (nibSize / 2 + this.dx22) * xMul;
-			let dy22 = (-nibSize / 2 + this.dy22) * yMul;
-			let dx1 = (nibSize / 2) * xMul;
-			let dy1 = nibSize * yMul;
-			let dx2 = (nibSize / 2) * xMul;
-			let dy2 = -nibSize * yMul;
+			let dx22 = (1 / 2 + this.dx22) * xMul;
+			let dy22 = (-1 / 2 + this.dy22) * yMul;
+			let dx1 = (1 / 2) * xMul;
+			let dy1 = yMul;
+			let dx2 = (1 / 2) * xMul;
+			let dy2 = -yMul;
 			if (this.orientation === LEFT_IN
 				|| this.orientation === RIGHT_IN
 				|| this.orientation === LEFT_OUT
@@ -213,6 +226,81 @@ window.addEventListener('load', function () {
 		nibTypes;
 		connectedComponent;
 		needsServerUpdate;
+		constructor(id, x, y, nibTypes) {
+			this.id = id;
+			this.x = x;
+			this.y = y;
+			this.nibTypes = nibTypes;
+			this.needsServerUpdate = false;
+			this.connectedComponent = [this];
+			const element = this.element = document.createElement('div');
+			element.classList.add('piece');
+			const outerThis = this;
+			element.addEventListener('mousedown', function(e) {
+				if (e.button !== 0) return;
+				draggingPiece = outerThis;
+				draggingPieceLastPos.x = e.clientX;
+				draggingPieceLastPos.y = e.clientY;
+				this.style.zIndex = ++pieceZIndexCounter;
+				this.style.cursor = 'none';
+			});
+			element.style.zIndex = 0; // default zIndex
+			this.updatePosition();
+			const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+			this.element.appendChild(svg);
+			this.updatePieceSize();
+			// disable animation during initialization
+			this.setAnimate(false);
+			playArea.appendChild(element);
+		}
+		updatePieceSize() {
+			const svg = this.element.querySelector('svg');
+			const clipPath = this.getClipPath();
+			this.element.style.clipPath = `path("${clipPath}")`;
+			svg.setAttribute('width', pieceWidth + 2 * nibSize);
+			svg.setAttribute('height', pieceHeight + 2 * nibSize);
+			svg.setAttribute('viewBox', `0 0 ${pieceWidth + 2 * nibSize} ${pieceHeight + 2 * nibSize}`);
+			svg.innerHTML = `<path d="${clipPath}" stroke-width="1" stroke="black" fill="none" />`;
+			this.element.style.backgroundPositionX = (nibSize - this.col() * pieceWidth) + 'px';
+			this.element.style.backgroundPositionY = (nibSize - this.row() * pieceHeight) + 'px';
+		}
+		col() {
+			return this.id % puzzleWidth;
+		}
+		row() {
+			return Math.floor(this.id / puzzleWidth);
+		}
+		updatePosition() {
+			this.element.style.left = (100 * this.x) + '%';
+			this.element.style.top = (100 * this.y) + '%';
+		}
+		boundingBox() {
+			const pos = canonicalToScreenPos(this);
+			return Object.preventExtensions({
+				left: pos.x, top: pos.y, right: pos.x + pieceWidth + 2 * nibSize, bottom: pos.y + pieceHeight + 2 * nibSize
+			});
+		}
+		deriveConnectedPiecePositions() {
+			if (this === this.connectedComponent[0]) {
+				const myRow = this.row();
+				const myCol = this.col();
+				for (const piece of this.connectedComponent) {
+					if (piece === this) continue;
+					const row = piece.row();
+					const col = piece.col();
+					piece.x = (col - myCol) * pieceWidth / playArea.clientWidth + this.x;
+					piece.y = (row - myRow) * pieceHeight / playArea.clientHeight + this.y;
+					piece.updatePosition();
+				}
+			}
+		}
+		setAnimate(enabled) {
+			if (enabled) {
+				this.element.classList.remove('no-animation');
+			} else {
+				this.element.classList.add('no-animation');
+			}
+		}
 		getClipPath() {
 			const nibTypes = this.nibTypes;
 			let shoulderWidth = (pieceWidth - nibSize) / 2;
@@ -241,65 +329,12 @@ window.addEventListener('load', function () {
 			clipPath.push(`L${nibSize} ${nibSize}`);
 			return clipPath.join(' ');
 		}
-		constructor(id, u, v, x, y, nibTypes) {
-			this.id = id;
-			this.x = x;
-			this.y = y;
-			this.u = u;
-			this.v = v;
-			this.needsServerUpdate = false;
-			this.connectedComponent = [this];
-			const element = this.element = document.createElement('div');
-			element.classList.add('piece');
-			const outerThis = this;
-			element.addEventListener('mousedown', function(e) {
-				if (e.button !== 0) return;
-				draggingPiece = outerThis;
-				draggingPieceLastPos.x = e.clientX;
-				draggingPieceLastPos.y = e.clientY;
-				this.style.zIndex = ++pieceZIndexCounter;
-				this.style.cursor = 'none';
-			});
-			element.style.zIndex = 0; // default zIndex
-			this.updateUV();
-			this.updatePosition();
-			this.nibTypes = nibTypes;
-			const clipPath = this.getClipPath();
-			this.element.style.clipPath = `path("${clipPath}")`;
-			const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-			svg.setAttribute('width', pieceWidth + 2 * nibSize);
-			svg.setAttribute('height', pieceHeight + 2 * nibSize);
-			svg.setAttribute('viewBox', `0 0 ${pieceWidth + 2 * nibSize} ${pieceHeight + 2 * nibSize}`);
-			svg.innerHTML = `<path d="${clipPath}" stroke-width="1" stroke="black" fill="none" />`;
-			this.element.appendChild(svg);
-			playArea.appendChild(element);
-		}
-		updateUV() {
-			this.element.style.backgroundPositionX = (nibSize - this.u) + 'px';
-			this.element.style.backgroundPositionY = (nibSize - this.v) + 'px';
-		}
-		col() {
-			return this.id % puzzleWidth;
-		}
-		row() {
-			return Math.floor(this.id / puzzleWidth);
-		}
-		updatePosition() {
-			this.element.style.left = (100 * this.x) + '%';
-			this.element.style.top = (100 * this.y) + '%';
-		}
-		boundingBox() {
-			const pos = canonicalToScreenPos(this);
-			return Object.preventExtensions({
-				left: pos.x, top: pos.y, right: pos.x + pieceWidth + 2 * nibSize, bottom: pos.y + pieceHeight + 2 * nibSize
-			});
-		}
 	}
 	window.addEventListener('mouseup', function() {
 		if (draggingPiece) {
 			let anyConnected = false;
 			for (const piece of draggingPiece.connectedComponent) {
-				piece.element.classList.remove('no-animation');
+				piece.setAnimate(true);
 				piece.element.style.zIndex = pieceZIndexCounter;
 				if (solved) break;
 				piece.needsServerUpdate = true;
@@ -323,7 +358,7 @@ window.addEventListener('load', function () {
 					let sqDist = diff[0] * diff[0] + diff[1] * diff[1];
 					if (sqDist < connectRadius * connectRadius) {
 						anyConnected = true;
-						connectPieces(piece, neighbour);
+						connectPieces(piece, neighbour, true);
 						socket.send(`connect ${piece.id} ${neighbour.id}`);
 					}
 				}
@@ -340,15 +375,15 @@ window.addEventListener('load', function () {
 			let dy = (e.clientY - draggingPieceLastPos.y) / playArea.clientHeight;
 			for (const piece of draggingPiece.connectedComponent) {
 				// ensure pieces don't go past left edge
-				dx = Math.max(dx, 0.001 - piece.x);
-				dy = Math.max(dy, 0.001 - piece.y);
+				dx = Math.max(dx, 0.0001 - piece.x);
+				dy = Math.max(dy, 0.0001 - piece.y);
 				// ensure pieces don't go past right edge
 				dx = Math.min(dx, 1.5 - piece.x);
 				dy = Math.min(dy, 1.5 - piece.y);
 			}
 			for (const piece of draggingPiece.connectedComponent) {
 				piece.element.style.zIndex = pieceZIndexCounter;
-				piece.element.classList.add('no-animation');
+				piece.setAnimate(false);
 				piece.x += dx;
 				piece.y += dy;
 				piece.updatePosition();
@@ -373,8 +408,20 @@ window.addEventListener('load', function () {
 		console.assert(connectivity.length === pieces.length);
 		let anyConnected = false;
 		for (let i = 0; i < pieces.length; i++) {
-			anyConnected |= connectPieces(pieces[i], pieces[connectivity[i]]);
+			anyConnected |= connectPieces(pieces[i], pieces[connectivity[i]], false);
 		}
+		for (let i = 0; i < pieces.length; i++) {
+			const piece = pieces[i];
+			const connectedComponent = piece.connectedComponent;
+			if (i === connectivity[i] && piece !== connectedComponent[0]) {
+				// ensure piece i comes first in my connected component if i === connectivity[i]
+				const index = connectedComponent.indexOf(piece);
+				connectedComponent.splice(index, 1);
+				connectedComponent.unshift(piece);
+				console.log(connectedComponent[0]);
+			}
+		}
+		deriveConnectedPiecePositions();
 		if (anyConnected) connectAudio.play();
 	}
 	async function initPuzzle(payload) {
@@ -405,18 +452,18 @@ window.addEventListener('load', function () {
 		}
 		let nibTypeIndex = 0;
 		if (playArea.clientWidth / puzzleWidth < playArea.clientHeight / puzzleHeight) {
-			pieceWidth = 0.6 * playArea.clientWidth / puzzleWidth;
+			pieceWidth = 0.8 * playArea.clientWidth / puzzleWidth;
 			pieceHeight = pieceWidth * (puzzleWidth / puzzleHeight) * (image.height / image.width);
 		} else {
-			pieceHeight = 0.6 * playArea.clientHeight / puzzleHeight;
+			pieceHeight = 0.8 * playArea.clientHeight / puzzleHeight;
 			pieceWidth = pieceHeight * (puzzleHeight / puzzleWidth) * (image.width / image.height);
 		}
-		nibSize = Math.min(pieceWidth / 4, pieceHeight / 4);
-		document.body.style.setProperty('--piece-width', (pieceWidth) + 'px');
-		document.body.style.setProperty('--piece-height', (pieceHeight) + 'px');
-		document.body.style.setProperty('--nib-size', (nibSize) + 'px');
-		document.body.style.setProperty('--image-width', (pieceWidth * puzzleWidth) + 'px');
-		document.body.style.setProperty('--image-height', (pieceHeight * puzzleHeight) + 'px');
+		// ensure full puzzle doesn't take up too much screen space
+		while (pieceWidth * puzzleWidth * pieceHeight * puzzleHeight > Math.max(1000, 0.5 * playArea.clientWidth * playArea.clientHeight)) {
+			pieceWidth *= 0.9;
+			pieceHeight *= 0.9;
+		}
+		setPieceSize(pieceWidth, pieceHeight);
 		for (let v = 0; v < puzzleHeight; v++) {
 			for (let u = 0; u < puzzleWidth; u++) {
 				let nibs = [null, null, null, null];
@@ -431,23 +478,30 @@ window.addEventListener('load', function () {
 					nibs[2] = NibType.random(Math.floor(random() * 2) ? BOTTOM_IN : BOTTOM_OUT);
 				}
 				if (u > 0) nibs[3] = pieces[id - 1].nibTypes[1].inverse();
-				pieces.push(new Piece(id, u * pieceWidth, v * pieceHeight, 0, 0, nibs));
+				pieces.push(new Piece(id, 0, 0, nibs));
 			}
 		}
 		console.assert(nibTypeIndex === nibTypeCount);
 		for (let id = 0; id < pieces.length; id++) {
+			if (id !== connectivity[id]) continue; // only set one piece positions per piece group
 			pieces[id].x = piecePositions[2 * connectivity[id]];
 			pieces[id].y = piecePositions[2 * connectivity[id] + 1];
 			pieces[id].updatePosition();
 		}
 		updateConnectivity(connectivity);
+		// a bit janky, but it stops the pieces from animating to their starting positions
+		setTimeout(() => {
+			for (const piece of pieces) {
+				piece.setAnimate(true);
+			}
+		}, 100);
 	}
 	function applyUpdate(update) {
 		const piecePositions = new Float32Array(update, 8, puzzleWidth * puzzleHeight * 2);
 		const connectivity = new Uint16Array(update, 8 + piecePositions.length * 4, puzzleWidth * puzzleHeight);
 		updateConnectivity(connectivity);
 		for (let i = 0; i < pieces.length; i++) {
-			// only receive the position of one piece per equivalence class mod is-connected-to
+			// only receive the position of one piece per piece group
 			if (connectivity[i] !== i) continue;
 			const piece = pieces[i];
 			if (piece.needsServerUpdate) continue;
@@ -555,4 +609,30 @@ window.addEventListener('load', function () {
 			}
 		}
 	});
+	const prevPlayAreaSize = Object.preventExtensions({width: playArea.clientWidth, height: playArea.clientHeight});
+	function everyFrame() {
+		if (prevPlayAreaSize !== playArea.clientWidth || prevPlayAreaSize !== playArea.clientHeight) {
+			// disable animations while moving the pieces
+			for (const piece of pieces) {
+				piece.setAnimate(false);
+			}
+			// re-derive piece positions so connected pieces don't disconnect
+			deriveConnectedPiecePositions();
+			setTimeout(() => {
+				for (const piece of pieces) {
+					piece.setAnimate(true);
+				}
+			}, 100);
+			prevPlayAreaSize.width = playArea.clientWidth;
+			prevPlayAreaSize.height = playArea.clientHeight;
+		}
+		requestAnimationFrame(everyFrame);
+	}
+	getById('piece-size-plus').addEventListener('click', () => {
+		setPieceSize(pieceWidth * 1.2, pieceHeight * 1.2);
+	});
+	getById('piece-size-minus').addEventListener('click', () => {
+		setPieceSize(pieceWidth / 1.2, pieceHeight / 1.2);
+	});
+	requestAnimationFrame(everyFrame);
 });

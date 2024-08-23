@@ -312,6 +312,9 @@ async fn handle_websocket(
 					.ok_or(Error::BadSyntax)?
 					.parse()
 					.map_err(|_| Error::BadSyntax)?;
+				if width < 3 || height < 3 {
+					return Err(Error::BadSyntax);
+				}
 				let url: String = parts.next().ok_or(Error::BadSyntax)?.replace(';', " ");
 				if url.len() > 2048 {
 					return Err(Error::ImageURLTooLong);

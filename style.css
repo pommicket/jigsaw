@@ -32,6 +32,19 @@ a, a:visited {
 	padding: 0 0.5em;
 }
 
+#header button {
+	border: 2px solid #000;
+	background: #ddd;
+}
+#header button:hover {
+	border: 2px solid #000;
+	background: #bbb;
+}
+#header button:active {
+	border: 2px solid #000;
+	background: #999;
+}
+
 #play-area {
 	width: 100vw;
 	/* annoyingly, firefox ESR 115 still doesn't support lh */
