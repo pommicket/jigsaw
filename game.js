@@ -260,7 +260,7 @@ window.addEventListener('load', function () {
 			svg.setAttribute('width', pieceWidth + 2 * nibSize);
 			svg.setAttribute('height', pieceHeight + 2 * nibSize);
 			svg.setAttribute('viewBox', `0 0 ${pieceWidth + 2 * nibSize} ${pieceHeight + 2 * nibSize}`);
-			svg.innerHTML = `<path d="${clipPath}" stroke-width="1" stroke="black" fill="none" />`;
+			svg.innerHTML = `<path d="${clipPath}" stroke-width="${pieceWidth < 50 ? 1 : 2}" stroke="black" fill="none" />`;
 			this.element.style.backgroundPositionX = (nibSize - this.col() * pieceWidth) + 'px';
 			this.element.style.backgroundPositionY = (nibSize - this.row() * pieceHeight) + 'px';
 		}
@@ -611,7 +611,7 @@ window.addEventListener('load', function () {
 	});
 	const prevPlayAreaSize = Object.preventExtensions({width: playArea.clientWidth, height: playArea.clientHeight});
 	function everyFrame() {
-		if (prevPlayAreaSize !== playArea.clientWidth || prevPlayAreaSize !== playArea.clientHeight) {
+		if (prevPlayAreaSize.width !== playArea.clientWidth || prevPlayAreaSize.height !== playArea.clientHeight) {
 			// disable animations while moving the pieces
 			for (const piece of pieces) {
 				piece.setAnimate(false);
