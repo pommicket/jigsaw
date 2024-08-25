@@ -102,6 +102,14 @@ window.addEventListener('load', function () {
 		let x2 = randomSeed >> 16;
 		return (x1 << 15 | x2) * (1 / (1 << 30));
 	}
+	function shuffle(l) {
+		for (let i = 0; i < l.length; i++) {
+			let j = Math.floor(random() * (i + 1));
+			let temp = l[i];
+			l[i] = l[j];
+			l[j] = temp;
+		}
+	}
 	const TOP_IN = 0;
 	const TOP_OUT = 1;
 	const RIGHT_IN = 2;
@@ -334,51 +342,59 @@ window.addEventListener('load', function () {
 			return clipPath.join(' ');
 		}
 	}
-	window.addEventListener('mouseup', function() {
-		if (draggingPiece) {
-			let anyConnected = false;
-			for (const piece of draggingPiece.connectedComponent) {
-				piece.setAnimate(true);
-				piece.element.style.zIndex = pieceZIndexCounter;
-				if (solved) break;
-				piece.needsServerUpdate = true;
-				const col = piece.col();
-				const row = piece.row();
-				const bbox = piece.boundingBox();
-				for (const [nx, ny] of [[0, -1], [0, 1], [1, 0], [-1, 0]]) {
-					if (col + nx < 0 || col + nx >= puzzleWidth
-						|| row + ny < 0 || row + ny >= puzzleHeight) {
-							continue;
-					}
-					let neighbour = pieces[piece.id + nx + ny * puzzleWidth];
-					if (neighbour.connectedComponent === piece.connectedComponent)
+	function stopDraggingPiece() {
+		let anyConnected = false;
+		for (const piece of draggingPiece.connectedComponent) {
+			piece.element.style.zIndex = pieceZIndexCounter;
+			if (solved) break;
+			piece.needsServerUpdate = true;
+			const col = piece.col();
+			const row = piece.row();
+			const bbox = piece.boundingBox();
+			for (const [nx, ny] of [[0, -1], [0, 1], [1, 0], [-1, 0]]) {
+				if (col + nx < 0 || col + nx >= puzzleWidth
+					|| row + ny < 0 || row + ny >= puzzleHeight) {
 						continue;
-					let neighbourBBox = neighbour.boundingBox();
-					let keyPointMe = [nx === -1 ? bbox.left + nibSize : bbox.right - nibSize,
-						ny === -1 ? bbox.top + nibSize : bbox.bottom - nibSize];
-					let keyPointNeighbour = [nx === 1 ?  neighbourBBox.left + nibSize : neighbourBBox.right - nibSize,
-						ny === 1 ? neighbourBBox.top + nibSize : neighbourBBox.bottom - nibSize];
-					let diff = [keyPointMe[0] - keyPointNeighbour[0], keyPointMe[1] - keyPointNeighbour[1]];
-					let sqDist = diff[0] * diff[0] + diff[1] * diff[1];
-					if (sqDist < connectRadius * connectRadius) {
-						anyConnected = true;
-						connectPieces(piece, neighbour, true);
-						if (multiplayer) {
-							socket.send(new Uint32Array([ACTION_CONNECT, piece.id, neighbour.id]));
-						}
+				}
+				let neighbour = pieces[piece.id + nx + ny * puzzleWidth];
+				if (neighbour.connectedComponent === piece.connectedComponent)
+					continue;
+				let neighbourBBox = neighbour.boundingBox();
+				let keyPointMe = [nx === -1 ? bbox.left + nibSize : bbox.right - nibSize,
+					ny === -1 ? bbox.top + nibSize : bbox.bottom - nibSize];
+				let keyPointNeighbour = [nx === 1 ?  neighbourBBox.left + nibSize : neighbourBBox.right - nibSize,
+					ny === 1 ? neighbourBBox.top + nibSize : neighbourBBox.bottom - nibSize];
+				let diff = [keyPointMe[0] - keyPointNeighbour[0], keyPointMe[1] - keyPointNeighbour[1]];
+				let sqDist = diff[0] * diff[0] + diff[1] * diff[1];
+				if (sqDist < connectRadius * connectRadius) {
+					anyConnected = true;
+					connectPieces(piece, neighbour, true);
+					if (multiplayer) {
+						socket.send(new Uint32Array([ACTION_CONNECT, piece.id, neighbour.id]));
 					}
 				}
 			}
-			draggingPiece.element.style.removeProperty('cursor');
-			draggingPiece = null;
-			if (anyConnected)
-				connectAudio.play();
+		}
+		draggingPiece.element.style.removeProperty('cursor');
+		draggingPiece = null;
+		if (anyConnected)
+			connectAudio.play();
+		setTimeout(() => {
+			for (const piece of draggingPiece.connectedComponent)
+				piece.setAnimate(true);
+		}, 1);
+	}
+	window.addEventListener('mouseup', function() {
+		if (draggingPiece) {
+			stopDraggingPiece();
 		}
 	});
 	window.addEventListener('mousemove', function(e) {
 		if (draggingPiece) {
 			let dx = (e.clientX - draggingPieceLastPos.x) / playArea.clientWidth;
 			let dy = (e.clientY - draggingPieceLastPos.y) / playArea.clientHeight;
+			let originalDx = dx;
+			let originalDy = dy;
 			for (const piece of draggingPiece.connectedComponent) {
 				// ensure pieces don't go past left edge
 				dx = Math.max(dx, 0.0001 - piece.x);
@@ -396,6 +412,10 @@ window.addEventListener('load', function () {
 			}
 			draggingPieceLastPos.x = e.clientX;
 			draggingPieceLastPos.y = e.clientY;
+			if (dx !== originalDx || dy !== originalDy) {
+				// stop dragging piece if it was dragged past edge
+				stopDraggingPiece();
+			}
 		}
 	});
 	function loadImage() {
@@ -439,7 +459,7 @@ window.addEventListener('load', function () {
 			pieceWidth = pieceHeight * (puzzleHeight / puzzleWidth) * (image.width / image.height);
 		}
 		// ensure full puzzle doesn't take up too much screen space
-		while (pieceWidth * puzzleWidth * pieceHeight * puzzleHeight > Math.max(1000, 0.5 * playArea.clientWidth * playArea.clientHeight)) {
+		while (pieceWidth * puzzleWidth * pieceHeight * puzzleHeight > Math.max(1000, 0.4 * playArea.clientWidth * playArea.clientHeight)) {
 			pieceWidth *= 0.9;
 			pieceHeight *= 0.9;
 		}
@@ -486,6 +506,19 @@ window.addEventListener('load', function () {
 		getById('host-multiplayer').style.display = 'inline-block';
 		setRandomSeed(puzzleSeed);
 		createPieces();
+		const piecePositions = [];
+		for (let y = 0; y < puzzleHeight; y++) {
+			for (let x = 0; x < puzzleWidth; x++) {
+				piecePositions.push([(x + random() * 0.3) / (puzzleWidth + 1),
+					(y + random() * 0.3) / (puzzleHeight + 1)]);
+			}
+		}
+		shuffle(piecePositions);
+		for (const piece of pieces) {
+			piece.x = piecePositions[piece.id][0];
+			piece.y = piecePositions[piece.id][1];
+			piece.updatePosition();
+		}
 		// a bit janky, but it stops the pieces from animating to their starting positions
 		setTimeout(() => {
 			for (const piece of pieces) {

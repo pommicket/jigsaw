@@ -83,7 +83,7 @@ impl Server {
 		self.database
 			.execute(
 				&self.set_puzzle_data,
-				&[&width, &height, &url, &connectivity, &positions, &id, &seed],
+				&[&width, &height, &url, &connectivity, &positions, &seed, &id],
 			)
 			.await?;
 		Ok(())
@@ -174,7 +174,7 @@ enum Error {
 	UTF8(std::str::Utf8Error),
 	BadPuzzleID,
 	BadPieceID,
-	BadSyntax,
+	BadSyntax(&'static str),
 	ImageURLTooLong,
 	TooManyPieces,
 	TooManyPlayers,
@@ -186,7 +186,7 @@ impl std::fmt::Display for Error {
 		match self {
 			Error::BadPieceID => write!(f, "bad piece ID"),
 			Error::BadPuzzleID => write!(f, "bad puzzle ID"),
-			Error::BadSyntax => write!(f, "bad syntax"),
+			Error::BadSyntax(s) => write!(f, "bad syntax: {s}"),
 			Error::ImageURLTooLong => write!(f, "image URL too long"),
 			Error::TooManyPieces => write!(f, "too many pieces"),
 			Error::NotJoined => write!(f, "haven't joined a puzzle"),
@@ -267,29 +267,32 @@ async fn handle_websocket(
 				let mut parts = dimensions.split(' ');
 				let width: u8 = parts
 					.next()
-					.ok_or(Error::BadSyntax)?
+					.ok_or(Error::BadSyntax("no width"))?
 					.parse()
-					.map_err(|_| Error::BadSyntax)?;
+					.map_err(|_| Error::BadSyntax("width not integer"))?;
 				let height: u8 = parts
 					.next()
-					.ok_or(Error::BadSyntax)?
+					.ok_or(Error::BadSyntax("no height"))?
 					.parse()
-					.map_err(|_| Error::BadSyntax)?;
+					.map_err(|_| Error::BadSyntax("height not integer"))?;
 				if width < 3 || height < 3 {
-					return Err(Error::BadSyntax);
+					return Err(Error::BadSyntax("dimensions too small"));
 				}
 				if usize::from(width) * usize::from(height) > MAX_PIECES {
 					return Err(Error::TooManyPieces);
 				}
-				let url: String = parts.next().ok_or(Error::BadSyntax)?.replace(';', " ");
+				let url: String = parts
+					.next()
+					.ok_or(Error::BadSyntax("no URL"))?
+					.replace(';', " ");
 				if url.len() > 2048 {
 					return Err(Error::ImageURLTooLong);
 				}
 				let seed = parts
 					.next()
-					.ok_or(Error::BadSyntax)?
+					.ok_or(Error::BadSyntax("no seed"))?
 					.parse()
-					.map_err(|_| Error::BadSyntax)?;
+					.map_err(|_| Error::BadSyntax("seed not integer"))?;
 				let piece_positions = vec![0.0f32; 2 * (width as usize) * (height as usize)];
 				let mut connectivity_data: Vec<u16> =
 					Vec::with_capacity(usize::from(width) * usize::from(height));
@@ -319,7 +322,10 @@ async fn handle_websocket(
 				ws.send(Message::Text(format!("id: {}", std::str::from_utf8(&id)?)))
 					.await?;
 			} else if let Some(id) = text.strip_prefix("join ") {
-				let id = id.as_bytes().try_into().map_err(|_| Error::BadSyntax)?;
+				let id = id
+					.as_bytes()
+					.try_into()
+					.map_err(|_| Error::BadSyntax("bad join ID"))?;
 				let mut player_counts = server.player_counts.lock().await;
 				let entry = player_counts.entry(id).or_default();
 				if *entry >= MAX_PLAYERS {
@@ -367,14 +373,16 @@ async fn handle_websocket(
 			}
 		} else if let Message::Binary(data) = &message {
 			if data.len() % 4 != 0 {
-				return Err(Error::BadSyntax);
+				return Err(Error::BadSyntax("binary message not multiple of 4 bytes"));
 			}
 			let puzzle_id = puzzle_id.ok_or(Error::NotJoined)?;
 			let mut reader_data = std::io::Cursor::new(data);
 			let reader = &mut reader_data;
 			fn read<const N: usize>(reader: &mut std::io::Cursor<&Vec<u8>>) -> Result<[u8; N]> {
 				let mut data = [0; N];
-				reader.read_exact(&mut data).map_err(|_| Error::BadSyntax)?;
+				reader
+					.read_exact(&mut data)
+					.map_err(|_| Error::BadSyntax("unexpected EOF in action sequence"))?;
 				Ok(data)
 			}
 			fn read_u32(reader: &mut std::io::Cursor<&Vec<u8>>) -> Result<u32> {
@@ -384,7 +392,7 @@ async fn handle_websocket(
 				Ok(f32::from_le_bytes(read(reader)?))
 			}
 			let message_id = read_u32(reader)?;
-			while !reader.get_ref().is_empty() {
+			while reader.position() < reader.get_ref().len() as u64 {
 				let action = read_u32(reader)?;
 				if action == ACTION_MOVE {
 					let piece: usize = read_u32(reader)? as _;
@@ -392,7 +400,7 @@ async fn handle_websocket(
 					let y: f32 = read_f32(reader)?;
 					for coord in [x, y] {
 						if !coord.is_finite() || coord < 0.0 || coord > 2.0 {
-							return Err(Error::BadSyntax);
+							return Err(Error::BadSyntax("piece position out of bounds"));
 						}
 					}
 					server.move_piece(puzzle_id, piece, x, y).await?;
@@ -401,7 +409,7 @@ async fn handle_websocket(
 					let piece2: usize = read_u32(reader)? as _;
 					server.connect_pieces(puzzle_id, piece1, piece2).await?;
 				} else {
-					return Err(Error::BadSyntax);
+					return Err(Error::BadSyntax("bad action"));
 				}
 			}
 			ws.send(Message::Text(format!("ack {message_id}"))).await?;
