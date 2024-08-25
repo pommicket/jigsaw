@@ -22,11 +22,21 @@ window.addEventListener('load', function () {
 	function setJoinLink(puzzleID) {
 		const url = new URL(location.href);
 		url.hash = '';
-		joinLink.href = '?' + new URLSearchParams({
+		url.search = '?' + new URLSearchParams({
 			join: puzzleID
 		}).toString();
+		joinLink.dataset.url = url.href;
 		joinLink.style.display = 'inline';
 	}
+	joinLink.addEventListener('click', function () {
+		const url = joinLink.dataset.url;
+		navigator.clipboard.writeText(url);
+		let prev = joinLink.innerText;
+		joinLink.innerText = '🔗 Copied to clipboard!';
+		setTimeout(() => {
+			joinLink.innerText = prev;
+		}, 3000);
+	});
 	if (joinPuzzle) setJoinLink(joinPuzzle);
 	let solved = false;
 	const connectRadius = 10;
@@ -35,7 +45,7 @@ window.addEventListener('load', function () {
 	let nibSize;
 	let pieceWidth;
 	let pieceHeight;
-	let multiplayer = !joinLink;
+	let multiplayer = !!joinPuzzle;
 	let waitingForAck = 0;
 	if (imageUrl && imageUrl.startsWith('http')) {
 		// make sure we use https
@@ -80,17 +90,29 @@ window.addEventListener('load', function () {
 		}
 	}
 	function setPieceSize(w, h) {
+		if (w * puzzleWidth >= playArea.clientWidth * 0.9
+			|| h * puzzleHeight >= playArea.clientHeight * 0.9
+			|| w < 5 || h < 5) {
+			return;
+		}
 		pieceWidth = w;
 		pieceHeight = h;
 		nibSize = Math.min(pieceWidth / 4, pieceHeight / 4);
-		for (const piece of pieces)
+		for (const piece of pieces) {
+			piece.setAnimate(false);
 			piece.updatePieceSize();
+		}
 		deriveConnectedPiecePositions();
 		document.body.style.setProperty('--piece-width', (pieceWidth) + 'px');
 		document.body.style.setProperty('--piece-height', (pieceHeight) + 'px');
 		document.body.style.setProperty('--nib-size', (nibSize) + 'px');
 		document.body.style.setProperty('--image-width', (pieceWidth * puzzleWidth) + 'px');
 		document.body.style.setProperty('--image-height', (pieceHeight * puzzleHeight) + 'px');
+		setTimeout(() => {
+			for (const piece of pieces) {
+				piece.setAnimate(true);
+			}
+		}, 100);
 	}
 	function random() {
 		// https://en.wikipedia.org/wiki/Linear_congruential_generator
@@ -296,12 +318,23 @@ window.addEventListener('load', function () {
 			if (this === this.connectedComponent[0]) {
 				const myRow = this.row();
 				const myCol = this.col();
+				let dx = 0;
+				let dy = 0;
 				for (const piece of this.connectedComponent) {
+					dx = Math.max(dx, -piece.x);
+					dy = Math.max(dy, -piece.y);
+					dx = Math.min(dx, 1.5 - piece.x);
+					dy = Math.min(dy, 1.5 - piece.y);
 					if (piece === this) continue;
 					const row = piece.row();
 					const col = piece.col();
 					piece.x = (col - myCol) * pieceWidth / playArea.clientWidth + this.x;
 					piece.y = (row - myRow) * pieceHeight / playArea.clientHeight + this.y;
+				}
+				// apply corrections so pieces don't go out of bounds
+				for (const piece of this.connectedComponent) {
+					piece.x += dx;
+					piece.y += dy;
 					piece.updatePosition();
 				}
 			}
@@ -344,7 +377,8 @@ window.addEventListener('load', function () {
 	}
 	function stopDraggingPiece() {
 		let anyConnected = false;
-		for (const piece of draggingPiece.connectedComponent) {
+		let connectedComponent = draggingPiece.connectedComponent;
+		for (const piece of connectedComponent) {
 			piece.element.style.zIndex = pieceZIndexCounter;
 			if (solved) break;
 			piece.needsServerUpdate = true;
@@ -357,7 +391,7 @@ window.addEventListener('load', function () {
 						continue;
 				}
 				let neighbour = pieces[piece.id + nx + ny * puzzleWidth];
-				if (neighbour.connectedComponent === piece.connectedComponent)
+				if (neighbour.connectedComponent === connectedComponent)
 					continue;
 				let neighbourBBox = neighbour.boundingBox();
 				let keyPointMe = [nx === -1 ? bbox.left + nibSize : bbox.right - nibSize,
@@ -370,19 +404,19 @@ window.addEventListener('load', function () {
 					anyConnected = true;
 					connectPieces(piece, neighbour, true);
 					if (multiplayer) {
-						socket.send(new Uint32Array([ACTION_CONNECT, piece.id, neighbour.id]));
+						socket.send(new Uint32Array([0, ACTION_CONNECT, piece.id, neighbour.id]));
 					}
 				}
 			}
 		}
+		setTimeout(() => {
+			for (const piece of connectedComponent)
+				piece.setAnimate(true);
+		}, 1);
 		draggingPiece.element.style.removeProperty('cursor');
 		draggingPiece = null;
 		if (anyConnected)
 			connectAudio.play();
-		setTimeout(() => {
-			for (const piece of draggingPiece.connectedComponent)
-				piece.setAnimate(true);
-		}, 1);
 	}
 	window.addEventListener('mouseup', function() {
 		if (draggingPiece) {
@@ -444,7 +478,6 @@ window.addEventListener('load', function () {
 				const index = connectedComponent.indexOf(piece);
 				connectedComponent.splice(index, 1);
 				connectedComponent.unshift(piece);
-				console.log(connectedComponent[0]);
 			}
 		}
 		deriveConnectedPiecePositions();
@@ -503,7 +536,6 @@ window.addEventListener('load', function () {
 		}
 		puzzleWidth = bestWidth;
 		puzzleHeight = heightFromWidth(puzzleWidth);
-		getById('host-multiplayer').style.display = 'inline-block';
 		setRandomSeed(puzzleSeed);
 		createPieces();
 		const piecePositions = [];
@@ -614,20 +646,27 @@ window.addEventListener('load', function () {
 		}
 	}
 	let waitingForServerToGiveUsImageUrl = false;
+	let puzzleCreated = null;
+	if (!joinPuzzle && imageUrl.startsWith('http')) {
+		puzzleCreated = createPuzzle();
+	}
 	socket.addEventListener('open', async () => {
 		if (joinPuzzle) {
 			socket.send(`join ${joinPuzzle}`);
-		} else if (imageUrl.startsWith('http')) {
-			createPuzzle();
-		} else if (imageUrl === 'randomFeaturedWikimedia') {
-			socket.send('randomFeaturedWikimedia');
-			waitingForServerToGiveUsImageUrl = true;
-		} else if (imageUrl === 'wikimediaPotd') {
-			socket.send('wikimediaPotd');
-			waitingForServerToGiveUsImageUrl = true;
 		} else {
-			// TODO : better error reporting
-			throw new Error("bad image URL");
+			if (imageUrl.startsWith('http')) {
+				await puzzleCreated;
+				getById('host-multiplayer').style.display = 'inline-block';
+			} else if (imageUrl === 'randomFeaturedWikimedia') {
+				socket.send('randomFeaturedWikimedia');
+				waitingForServerToGiveUsImageUrl = true;
+			} else if (imageUrl === 'wikimediaPotd') {
+				socket.send('wikimediaPotd');
+				waitingForServerToGiveUsImageUrl = true;
+			} else {
+				// TODO : better error reporting
+				throw new Error("bad image URL");
+			}
 		}
 	});
 	socket.addEventListener('message', async (e) => {
@@ -657,7 +696,8 @@ window.addEventListener('load', function () {
 				const parts = e.data.substring('useImage '.length).split(' ');
 				imageUrl = parts[0];
 				imageLink = parts.length > 1 ? parts[1] : imageUrl;
-				createPuzzle();
+				await createPuzzle();
+				getById('host-multiplayer').style.display = 'inline-block';
 			} else if (e.data.startsWith('error ')) {
 				const error = e.data.substring('error '.length);
 				console.error(error); // TODO : better error handling
@@ -666,12 +706,6 @@ window.addEventListener('load', function () {
 			const opcode = new Uint8Array(e.data, 0, 1)[0];
 			if (opcode === 1 && !pieces.length) { // init puzzle
 				await initPuzzle(e.data);
-				setInterval(() => {
-					if (multiplayer) {
-						socket.send('poll');
-					}
-				}, 1000);
-				setInterval(sendServerUpdate, 1000);
 			} else if (opcode === 2) { // update puzzle
 				applyUpdate(e.data);
 			}
@@ -703,7 +737,14 @@ window.addEventListener('load', function () {
 		setPieceSize(pieceWidth / 1.2, pieceHeight / 1.2);
 	});
 	getById('host-multiplayer').addEventListener('click', () => {
+		getById('host-multiplayer').style.display = 'none';
 		hostPuzzle();
 	});
+	setInterval(sendServerUpdate, 1000);
+	setInterval(() => {
+		if (multiplayer) {
+			socket.send('poll');
+		}
+	}, 1000);
 	requestAnimationFrame(everyFrame);
 });
