@@ -1,6 +1,2 @@
 - single player mode with no server
-- congratualations
 - handle server errors on the client side
-- let user select piece size
-- change piece.x,y to relative (% of play-area)
-- webgl? maybe?

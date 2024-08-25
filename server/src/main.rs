@@ -17,6 +17,8 @@ const PUZZLE_ID_CHARSET: &[u8] = b"23456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLM
 const PUZZLE_ID_LEN: usize = 7;
 const MAX_PLAYERS: u16 = 20;
 const MAX_PIECES: usize = 1000;
+const ACTION_MOVE: u32 = 3;
+const ACTION_CONNECT: u32 = 4;
 
 fn generate_puzzle_id() -> [u8; PUZZLE_ID_LEN] {
 	let mut rng = rand::thread_rng();
@@ -47,41 +49,11 @@ struct PuzzleInfo {
 	width: u8,
 	height: u8,
 	url: String,
-	nib_types: Vec<i16>,
+	seed: u32,
 	piece_info: PieceInfo,
 }
 
 impl Server {
-	async fn create_table_if_not_exists(&self) -> Result<()> {
-		if self
-			.database
-			.query("SELECT FROM puzzles", &[])
-			.await
-			.is_err()
-		{
-			self.database
-				.execute(
-					&format!(
-						"CREATE TABLE puzzles (
-				id char({PUZZLE_ID_LEN}) PRIMARY KEY,
-				url text,
-				width int4,
-				height int4,
-				create_time timestamp DEFAULT CURRENT_TIMESTAMP,
-				nib_types int2[],
-				connectivity int2[],
-				positions float4[]
-			)"
-					),
-					&[],
-				)
-				.await?;
-			self.database
-				.execute("CREATE INDEX by_id ON puzzles (id)", &[])
-				.await?;
-		}
-		Ok(())
-	}
 	async fn try_register_id(&self, id: [u8; PUZZLE_ID_LEN]) -> Result<bool> {
 		let id = std::str::from_utf8(&id)?;
 		Ok(self
@@ -96,31 +68,22 @@ impl Server {
 		width: u8,
 		height: u8,
 		url: &str,
-		nib_types: Vec<u16>,
 		piece_positions: &[f32],
 		connectivity: Vec<u16>,
+		seed: u32,
 	) -> Result<()> {
 		let id = std::str::from_utf8(&id)?;
 		let width = i32::from(width);
 		let height = i32::from(height);
+		let seed = seed as i32;
 		// transmuting u16 to i16 should never give an error. they have the same alignment.
-		let nib_types: &[i16] =
-			transmute_many_pedantic(transmute_to_bytes(&nib_types[..])).unwrap();
 		let connectivity: &[i16] =
 			transmute_many_pedantic(transmute_to_bytes(&connectivity[..])).unwrap();
 		let positions = &piece_positions;
 		self.database
 			.execute(
 				&self.set_puzzle_data,
-				&[
-					&width,
-					&height,
-					&url,
-					&nib_types,
-					&connectivity,
-					&positions,
-					&id,
-				],
+				&[&width, &height, &url, &connectivity, &positions, &id, &seed],
 			)
 			.await?;
 		Ok(())
@@ -179,13 +142,13 @@ impl Server {
 		let height: i32 = row.try_get(1)?;
 		let url: String = row.try_get(2)?;
 		let positions: Vec<f32> = row.try_get(3)?;
-		let nib_types: Vec<i16> = row.try_get(4)?;
+		let seed: i32 = row.try_get(4)?;
 		let connectivity: Vec<i16> = row.try_get(5)?;
 		Ok(PuzzleInfo {
 			width: width as u8,
 			height: height as u8,
 			url,
-			nib_types,
+			seed: seed as u32,
 			piece_info: PieceInfo {
 				positions,
 				connectivity,
@@ -267,15 +230,15 @@ async fn get_puzzle_info(server: &Server, id: &[u8]) -> Result<Vec<u8>> {
 		width,
 		height,
 		url,
-		nib_types,
+		seed,
 		piece_info: PieceInfo {
 			positions,
 			connectivity,
 		},
 	} = server.get_puzzle_info(id).await?;
+	data.extend(seed.to_le_bytes());
 	data.push(width);
 	data.push(height);
-	data.extend(transmute_to_bytes(&nib_types[..]));
 	data.extend(url.as_bytes());
 	data.push(0);
 	while data.len() % 8 != 0 {
@@ -315,37 +278,19 @@ async fn handle_websocket(
 				if width < 3 || height < 3 {
 					return Err(Error::BadSyntax);
 				}
+				if usize::from(width) * usize::from(height) > MAX_PIECES {
+					return Err(Error::TooManyPieces);
+				}
 				let url: String = parts.next().ok_or(Error::BadSyntax)?.replace(';', " ");
 				if url.len() > 2048 {
 					return Err(Error::ImageURLTooLong);
 				}
-				if usize::from(width) * usize::from(height) > MAX_PIECES {
-					return Err(Error::TooManyPieces);
-				}
-				let nib_count = 2 * usize::from(width) * usize::from(height)
-					- usize::from(width) - usize::from(height);
-				let mut nib_types: Vec<u16> = Vec::with_capacity(nib_count);
-				let mut piece_positions: Vec<[f32; 2]> =
-					Vec::with_capacity((width as usize) * (height as usize));
-				{
-					let mut rng = rand::thread_rng();
-					// pick nib types
-					for _ in 0..nib_count {
-						nib_types.push(rng.gen());
-					}
-					// pick piece positions
-					for y in 0..u16::from(height) {
-						for x in 0..u16::from(width) {
-							let dx: f32 = rng.gen_range(0.0..0.3);
-							let dy: f32 = rng.gen_range(0.0..0.3);
-							piece_positions.push([
-								(f32::from(x) + dx) / (f32::from(width) + 1.0),
-								(f32::from(y) + dy) / (f32::from(height) + 1.0),
-							]);
-						}
-					}
-					piece_positions.shuffle(&mut rng);
-				}
+				let seed = parts
+					.next()
+					.ok_or(Error::BadSyntax)?
+					.parse()
+					.map_err(|_| Error::BadSyntax)?;
+				let piece_positions = vec![0.0f32; 2 * (width as usize) * (height as usize)];
 				let mut connectivity_data: Vec<u16> =
 					Vec::with_capacity(usize::from(width) * usize::from(height));
 				for i in 0..u16::from(width) * u16::from(height) {
@@ -364,17 +309,15 @@ async fn handle_websocket(
 						width,
 						height,
 						&url,
-						nib_types,
-						piece_positions.as_flattened(),
+						&piece_positions,
 						connectivity_data,
+						seed,
 					)
 					.await?;
 				server.player_counts.lock().await.insert(id, 1);
 				*puzzle_id = Some(id);
 				ws.send(Message::Text(format!("id: {}", std::str::from_utf8(&id)?)))
 					.await?;
-				let info = get_puzzle_info(server, &id).await?;
-				ws.send(Message::Binary(info)).await?;
 			} else if let Some(id) = text.strip_prefix("join ") {
 				let id = id.as_bytes().try_into().map_err(|_| Error::BadSyntax)?;
 				let mut player_counts = server.player_counts.lock().await;
@@ -387,48 +330,6 @@ async fn handle_websocket(
 				*puzzle_id = Some(id);
 				let info = get_puzzle_info(server, &id).await?;
 				ws.send(Message::Binary(info)).await?;
-			} else if text.starts_with("move ") {
-				let puzzle_id = puzzle_id.ok_or(Error::NotJoined)?;
-				for line in text.split('\n') {
-					let mut parts = line.split(' ');
-					parts.next(); // skip "move"
-					let piece: usize = parts
-						.next()
-						.ok_or(Error::BadSyntax)?
-						.parse()
-						.map_err(|_| Error::BadSyntax)?;
-					let x: f32 = parts
-						.next()
-						.ok_or(Error::BadSyntax)?
-						.parse()
-						.map_err(|_| Error::BadSyntax)?;
-					let y: f32 = parts
-						.next()
-						.ok_or(Error::BadSyntax)?
-						.parse()
-						.map_err(|_| Error::BadSyntax)?;
-					for coord in [x, y] {
-						if !coord.is_finite() || coord < 0.0 || coord > 2.0 {
-							return Err(Error::BadSyntax);
-						}
-					}
-					server.move_piece(puzzle_id, piece, x, y).await?;
-				}
-				ws.send(Message::Text("ack".to_string())).await?;
-			} else if let Some(data) = text.strip_prefix("connect ") {
-				let mut parts = data.split(' ');
-				let puzzle_id = puzzle_id.ok_or(Error::NotJoined)?;
-				let piece1: usize = parts
-					.next()
-					.ok_or(Error::BadSyntax)?
-					.parse()
-					.map_err(|_| Error::BadSyntax)?;
-				let piece2: usize = parts
-					.next()
-					.ok_or(Error::BadSyntax)?
-					.parse()
-					.map_err(|_| Error::BadSyntax)?;
-				server.connect_pieces(puzzle_id, piece1, piece2).await?;
 			} else if text == "poll" {
 				let puzzle_id = puzzle_id.ok_or(Error::NotJoined)?;
 				let PieceInfo {
@@ -464,6 +365,46 @@ async fn handle_websocket(
 				)))
 				.await?;
 			}
+		} else if let Message::Binary(data) = &message {
+			if data.len() % 4 != 0 {
+				return Err(Error::BadSyntax);
+			}
+			let puzzle_id = puzzle_id.ok_or(Error::NotJoined)?;
+			let mut reader_data = std::io::Cursor::new(data);
+			let reader = &mut reader_data;
+			fn read<const N: usize>(reader: &mut std::io::Cursor<&Vec<u8>>) -> Result<[u8; N]> {
+				let mut data = [0; N];
+				reader.read_exact(&mut data).map_err(|_| Error::BadSyntax)?;
+				Ok(data)
+			}
+			fn read_u32(reader: &mut std::io::Cursor<&Vec<u8>>) -> Result<u32> {
+				Ok(u32::from_le_bytes(read(reader)?))
+			}
+			fn read_f32(reader: &mut std::io::Cursor<&Vec<u8>>) -> Result<f32> {
+				Ok(f32::from_le_bytes(read(reader)?))
+			}
+			let message_id = read_u32(reader)?;
+			while !reader.get_ref().is_empty() {
+				let action = read_u32(reader)?;
+				if action == ACTION_MOVE {
+					let piece: usize = read_u32(reader)? as _;
+					let x: f32 = read_f32(reader)?;
+					let y: f32 = read_f32(reader)?;
+					for coord in [x, y] {
+						if !coord.is_finite() || coord < 0.0 || coord > 2.0 {
+							return Err(Error::BadSyntax);
+						}
+					}
+					server.move_piece(puzzle_id, piece, x, y).await?;
+				} else if action == ACTION_CONNECT {
+					let piece1: usize = read_u32(reader)? as _;
+					let piece2: usize = read_u32(reader)? as _;
+					server.connect_pieces(puzzle_id, piece1, piece2).await?;
+				} else {
+					return Err(Error::BadSyntax);
+				}
+			}
+			ws.send(Message::Text(format!("ack {message_id}"))).await?;
 		}
 	}
 	Ok(())
@@ -474,8 +415,8 @@ async fn handle_connection(server: &Server, conn: &mut tokio::net::TcpStream) ->
 	let mut ws = tokio_tungstenite::accept_async_with_config(
 		conn,
 		Some(tungstenite::protocol::WebSocketConfig {
-			max_message_size: Some(65536),
-			max_frame_size: Some(65536),
+			max_message_size: Some(128 << 10),
+			max_frame_size: Some(128 << 10),
 			..Default::default()
 		}),
 	)
@@ -525,6 +466,32 @@ async fn get_potd() -> String {
 	}
 }
 
+async fn create_table_if_doesnt_exist(database: &tokio_postgres::Client) -> Result<()> {
+	if database.query("SELECT FROM puzzles", &[]).await.is_err() {
+		database
+			.execute(
+				&format!(
+					"CREATE TABLE puzzles (
+			id char({PUZZLE_ID_LEN}) PRIMARY KEY,
+			url text,
+			width int4,
+			height int4,
+			create_time timestamp DEFAULT CURRENT_TIMESTAMP,
+			seed int4,
+			connectivity int2[],
+			positions float4[]
+		)"
+				),
+				&[],
+			)
+			.await?;
+		database
+			.execute("CREATE INDEX by_id ON puzzles (id)", &[])
+			.await?;
+	}
+	Ok(())
+}
+
 #[tokio::main]
 async fn main() {
 	let port = 54472;
@@ -554,6 +521,10 @@ async fn main() {
 				eprintln!("connection error: {}", e);
 			}
 		});
+		if let Err(e) = create_table_if_doesnt_exist(&client).await {
+			eprintln!("couldn't create table: {e}");
+			return;
+		};
 		use tokio_postgres::types::Type;
 		let create_puzzle = client
 			.prepare_typed("INSERT INTO puzzles (id) VALUES ($1)", &[Type::BPCHAR])
@@ -561,15 +532,15 @@ async fn main() {
 			.expect("couldn't prepare create_puzzle statement");
 		let set_puzzle_data = client
 			.prepare_typed(
-				"UPDATE puzzles SET width = $1, height = $2, url = $3, nib_types = $4,
-    			connectivity = $5, positions = $6 WHERE id = $7",
+				"UPDATE puzzles SET width = $1, height = $2, url = $3,
+    			connectivity = $4, positions = $5, seed = $6 WHERE id = $7",
 				&[
 					Type::INT4,
 					Type::INT4,
 					Type::TEXT,
 					Type::INT2_ARRAY,
-					Type::INT2_ARRAY,
 					Type::FLOAT4_ARRAY,
+					Type::INT4,
 					Type::BPCHAR,
 				],
 			)
@@ -589,7 +560,7 @@ async fn main() {
 			)
 			.await
 			.expect("couldn't prepare get_piece_info statement");
-		let get_puzzle_info = client.prepare_typed("SELECT width, height, url, positions, nib_types, connectivity FROM puzzles WHERE id = $1", &[Type::BPCHAR])
+		let get_puzzle_info = client.prepare_typed("SELECT width, height, url, positions, seed, connectivity FROM puzzles WHERE id = $1", &[Type::BPCHAR])
 			.await.expect("couldn't prepare get_puzzle_info statement");
 		Server {
 			player_counts: Mutex::new(HashMap::new()),
@@ -604,10 +575,6 @@ async fn main() {
 			wikimedia_featured,
 		}
 	}));
-	server
-		.create_table_if_not_exists()
-		.await
-		.expect("error creating table");
 	tokio::task::spawn(async move {
 		fn next_day(t: SystemTime) -> SystemTime {
 			let day = 60 * 60 * 24;

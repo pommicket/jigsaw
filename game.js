@@ -1,8 +1,11 @@
 'use strict';
 window.addEventListener('load', function () {
+	const ACTION_MOVE = 3;
+	const ACTION_CONNECT = 4;
 	const socket = new WebSocket(location.protocol === "file:" || location.hostname === "localhost" ? "ws://localhost:54472" : "wss://jigsaw.pommicket.com");
 	const searchParams = new URL(location.href).searchParams;
 	socket.binaryType = "arraybuffer";
+	let puzzleSeed = Math.floor(Math.random() * 0x7fffffff);
 	// direct URL to image file
 	let imageUrl = searchParams.has('image') ? encodeURI(searchParams.get('image')) : undefined;
 	// link to page with info about image (e.g. https://commons.wikimedia.org/wiki/File:Foo.jpg)
@@ -32,7 +35,8 @@ window.addEventListener('load', function () {
 	let nibSize;
 	let pieceWidth;
 	let pieceHeight;
-	let receivedAck = true;
+	let multiplayer = !joinLink;
+	let waitingForAck = 0;
 	if (imageUrl && imageUrl.startsWith('http')) {
 		// make sure we use https
 		let url = new URL(imageUrl);
@@ -231,7 +235,7 @@ window.addEventListener('load', function () {
 			this.x = x;
 			this.y = y;
 			this.nibTypes = nibTypes;
-			this.needsServerUpdate = false;
+			this.needsServerUpdate = true;
 			this.connectedComponent = [this];
 			const element = this.element = document.createElement('div');
 			element.classList.add('piece');
@@ -359,7 +363,9 @@ window.addEventListener('load', function () {
 					if (sqDist < connectRadius * connectRadius) {
 						anyConnected = true;
 						connectPieces(piece, neighbour, true);
-						socket.send(`connect ${piece.id} ${neighbour.id}`);
+						if (multiplayer) {
+							socket.send(new Uint32Array([ACTION_CONNECT, piece.id, neighbour.id]));
+						}
 					}
 				}
 			}
@@ -424,33 +430,7 @@ window.addEventListener('load', function () {
 		deriveConnectedPiecePositions();
 		if (anyConnected) connectAudio.play();
 	}
-	async function initPuzzle(payload) {
-		const data = new Uint8Array(payload, payload.length);
-		if (joinPuzzle) {
-			puzzleWidth = data[8];
-			puzzleHeight = data[9];
-		} else {
-			console.assert(puzzleWidth === data[8]);
-			console.assert(puzzleHeight === data[9]);
-		}
-		const nibTypesOffset = 10;
-		const nibTypeCount = 2 * puzzleWidth * puzzleHeight - puzzleWidth - puzzleHeight;
-		const nibTypes = new Uint16Array(payload, nibTypesOffset, nibTypeCount);
-		const imageUrlOffset = nibTypesOffset + nibTypeCount * 2;
-		const imageUrlLen = new Uint8Array(payload, imageUrlOffset, data.length - imageUrlOffset).indexOf(0);
-		const imageUrlBytes = new Uint8Array(payload, imageUrlOffset, imageUrlLen);
-		let piecePositionsOffset = imageUrlOffset + imageUrlLen + 1;
-		piecePositionsOffset = Math.floor((piecePositionsOffset + 7) / 8) * 8; // align to 8 bytes
-		const piecePositions = new Float32Array(payload, piecePositionsOffset, puzzleWidth * puzzleHeight * 2);
-		const connectivityOffset = piecePositionsOffset + piecePositions.length * 4;
-		const connectivity = new Uint16Array(payload, connectivityOffset, puzzleWidth * puzzleHeight);
-		if (joinPuzzle) {
-			const parts = new TextDecoder().decode(imageUrlBytes).split(' ');
-			imageUrl = parts[0];
-			imageLink = parts.length > 1 ? parts[1] : parts[0];
-			await loadImage();
-		}
-		let nibTypeIndex = 0;
+	function createPieces() {
 		if (playArea.clientWidth / puzzleWidth < playArea.clientHeight / puzzleHeight) {
 			pieceWidth = 0.8 * playArea.clientWidth / puzzleWidth;
 			pieceHeight = pieceWidth * (puzzleWidth / puzzleHeight) * (image.height / image.width);
@@ -470,18 +450,68 @@ window.addEventListener('load', function () {
 				let id = pieces.length;
 				if (v > 0) nibs[0] = pieces[id - puzzleWidth].nibTypes[2].inverse();
 				if (u < puzzleWidth - 1) {
-					setRandomSeed(nibTypes[nibTypeIndex++]);
 					nibs[1] = NibType.random(Math.floor(random() * 2) ? RIGHT_IN : RIGHT_OUT);
 				}
 				if (v < puzzleHeight - 1) {
-					setRandomSeed(nibTypes[nibTypeIndex++]);
 					nibs[2] = NibType.random(Math.floor(random() * 2) ? BOTTOM_IN : BOTTOM_OUT);
 				}
 				if (u > 0) nibs[3] = pieces[id - 1].nibTypes[1].inverse();
 				pieces.push(new Piece(id, 0, 0, nibs));
 			}
 		}
-		console.assert(nibTypeIndex === nibTypeCount);
+	}
+	async function createPuzzle() {
+		await loadImage();
+		if (isNaN(roughPieceCount) || roughPieceCount < 10 || roughPieceCount > 1000) {
+			// TODO : better error reporting
+			console.error('bad piece count');
+			return;
+		}
+		let bestWidth = 1;
+		let bestDiff = Infinity;
+		function heightFromWidth(w) {
+			return Math.min(255, Math.max(2, Math.round(w * image.height / image.width)));
+		}
+		for (let width = 2; width < 256; width++) {
+			const height = heightFromWidth(width);
+			if (width * height > 1000) break;
+			const diff = Math.abs(width * height - roughPieceCount);
+			if (diff < bestDiff) {
+				bestDiff = diff;
+				bestWidth = width;
+			}
+		}
+		puzzleWidth = bestWidth;
+		puzzleHeight = heightFromWidth(puzzleWidth);
+		getById('host-multiplayer').style.display = 'inline-block';
+		setRandomSeed(puzzleSeed);
+		createPieces();
+		// a bit janky, but it stops the pieces from animating to their starting positions
+		setTimeout(() => {
+			for (const piece of pieces) {
+				piece.setAnimate(true);
+			}
+		}, 100);
+	}
+	async function initPuzzle(payload) {
+		const data = new Uint8Array(payload, payload.length);
+		puzzleSeed = new Uint32Array(payload, 8, 1)[0];
+		setRandomSeed(puzzleSeed);
+		puzzleWidth = data[12];
+		puzzleHeight = data[13];
+		const imageUrlOffset = 14;
+		const imageUrlLen = new Uint8Array(payload, imageUrlOffset, data.length - imageUrlOffset).indexOf(0);
+		const imageUrlBytes = new Uint8Array(payload, imageUrlOffset, imageUrlLen);
+		let piecePositionsOffset = imageUrlOffset + imageUrlLen + 1;
+		piecePositionsOffset = Math.floor((piecePositionsOffset + 7) / 8) * 8; // align to 8 bytes
+		const piecePositions = new Float32Array(payload, piecePositionsOffset, puzzleWidth * puzzleHeight * 2);
+		const connectivityOffset = piecePositionsOffset + piecePositions.length * 4;
+		const connectivity = new Uint16Array(payload, connectivityOffset, puzzleWidth * puzzleHeight);
+		const parts = new TextDecoder().decode(imageUrlBytes).split(' ');
+		imageUrl = parts[0];
+		imageLink = parts.length > 1 ? parts[1] : parts[0];
+		await loadImage();
+		createPieces();
 		for (let id = 0; id < pieces.length; id++) {
 			if (id !== connectivity[id]) continue; // only set one piece positions per piece group
 			pieces[id].x = piecePositions[2 * connectivity[id]];
@@ -495,6 +525,10 @@ window.addEventListener('load', function () {
 				piece.setAnimate(true);
 			}
 		}, 100);
+	}
+	async function hostPuzzle() {
+		socket.send(`new ${puzzleWidth} ${puzzleHeight} ${imageUrl};${imageLink} ${puzzleSeed}`);
+		multiplayer = true;
 	}
 	function applyUpdate(update) {
 		const piecePositions = new Float32Array(update, 8, puzzleWidth * puzzleHeight * 2);
@@ -524,48 +558,34 @@ window.addEventListener('load', function () {
 	}
 	function sendServerUpdate() {
 		// send update to server
-		if (!receivedAck) return; // last update hasn't been acknowledged yet
-		const motions = [];
+		if (!multiplayer) return;
+		if (waitingForAck) return; // last update hasn't been acknowledged yet
+		let actions = new Uint32Array(pieces.length * 4 + 1);
+		const pos = new Float32Array(2);
+		const posU8 = new Uint8Array(pos.buffer);
+		let i = 0;
+		let messageID = 0x12345678; // message ID for regular updates
+		actions[i++] = messageID;
 		for (const piece of pieces) {
 			if (!piece.needsServerUpdate) continue;
-			motions.push(`move ${piece.id} ${piece.x} ${piece.y}`);
+			actions[i++] = ACTION_MOVE;
+			actions[i++] = piece.id;
+			pos[0] = piece.x;
+			pos[1] = piece.y;
+			new Uint8Array(actions.buffer, 4 * i, 8).set(posU8);
+			i += 2;
 		}
-		if (motions.length) {
-			receivedAck = false;
-			socket.send(motions.join('\n'));
+		if (i > 1) {
+			waitingForAck = messageID;
+			socket.send(new Uint32Array(actions.buffer, 0, i));
 		}
-	}	
-	async function hostPuzzle() {
-		await loadImage();
-		if (isNaN(roughPieceCount) || roughPieceCount < 10 || roughPieceCount > 1000) {
-			// TODO : better error reporting
-			console.error('bad piece count');
-			return;
-		}
-		let bestWidth = 1;
-		let bestDiff = Infinity;
-		function heightFromWidth(w) {
-			return Math.min(255, Math.max(2, Math.round(w * image.height / image.width)));
-		}
-		for (let width = 2; width < 256; width++) {
-			const height = heightFromWidth(width);
-			if (width * height > 1000) break;
-			const diff = Math.abs(width * height - roughPieceCount);
-			if (diff < bestDiff) {
-				bestDiff = diff;
-				bestWidth = width;
-			}
-		}
-		puzzleWidth = bestWidth;
-		puzzleHeight = heightFromWidth(puzzleWidth);
-		socket.send(`new ${puzzleWidth} ${puzzleHeight} ${imageUrl};${imageLink}`);
 	}
 	let waitingForServerToGiveUsImageUrl = false;
 	socket.addEventListener('open', async () => {
 		if (joinPuzzle) {
 			socket.send(`join ${joinPuzzle}`);
 		} else if (imageUrl.startsWith('http')) {
-			hostPuzzle();
+			createPuzzle();
 		} else if (imageUrl === 'randomFeaturedWikimedia') {
 			socket.send('randomFeaturedWikimedia');
 			waitingForServerToGiveUsImageUrl = true;
@@ -581,19 +601,30 @@ window.addEventListener('load', function () {
 		if (typeof e.data === 'string') {
 			if (e.data.startsWith('id: ')) {
 				let puzzleID = e.data.split(' ')[1];
+				sendServerUpdate(); // send piece positions
+				const connectivityUpdate = [0 /* message ID */];
+				for (const piece of pieces) {
+					if (piece !== piece.connectedComponent[0]) {
+						connectivityUpdate.push(ACTION_CONNECT, piece.connectedComponent[0].id, piece.id);
+					}
+				}
+				socket.send(new Uint32Array(connectivityUpdate));
 				history.pushState({}, null, `?join=${puzzleID}`);
 				setJoinLink(puzzleID);
-			} else if (e.data === 'ack') {
-				for (const piece of pieces) {
-					piece.needsServerUpdate = false;
+			} else if (e.data.startsWith('ack')) {
+				const messageID = parseInt(e.data.split(' ')[1]);
+				if (messageID === waitingForAck) {
+					for (const piece of pieces) {
+						piece.needsServerUpdate = false;
+					}
+					waitingForAck = 0;
 				}
-				receivedAck = true;
 			} else if (waitingForServerToGiveUsImageUrl && e.data.startsWith('useImage ')) {
 				waitingForServerToGiveUsImageUrl = false;
 				const parts = e.data.substring('useImage '.length).split(' ');
 				imageUrl = parts[0];
 				imageLink = parts.length > 1 ? parts[1] : imageUrl;
-				hostPuzzle();
+				createPuzzle();
 			} else if (e.data.startsWith('error ')) {
 				const error = e.data.substring('error '.length);
 				console.error(error); // TODO : better error handling
@@ -602,7 +633,11 @@ window.addEventListener('load', function () {
 			const opcode = new Uint8Array(e.data, 0, 1)[0];
 			if (opcode === 1 && !pieces.length) { // init puzzle
 				await initPuzzle(e.data);
-				setInterval(() => socket.send('poll'), 1000);
+				setInterval(() => {
+					if (multiplayer) {
+						socket.send('poll');
+					}
+				}, 1000);
 				setInterval(sendServerUpdate, 1000);
 			} else if (opcode === 2) { // update puzzle
 				applyUpdate(e.data);
@@ -633,6 +668,9 @@ window.addEventListener('load', function () {
 	});
 	getById('piece-size-minus').addEventListener('click', () => {
 		setPieceSize(pieceWidth / 1.2, pieceHeight / 1.2);
+	});
+	getById('host-multiplayer').addEventListener('click', () => {
+		hostPuzzle();
 	});
 	requestAnimationFrame(everyFrame);
 });
