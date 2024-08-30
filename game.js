@@ -2,9 +2,8 @@
 window.addEventListener('load', function () {
 	const ACTION_MOVE = 3;
 	const ACTION_CONNECT = 4;
-	const socket = new WebSocket(location.protocol === "file:" || location.hostname === "localhost" ? "ws://localhost:54472" : "wss://jigsaw.pommicket.com");
+	let socket;
 	const searchParams = new URL(location.href).searchParams;
-	socket.binaryType = "arraybuffer";
 	let puzzleSeed = Math.floor(Math.random() * 0x7fffffff);
 	// direct URL to image file
 	let imageUrl = searchParams.has('image') ? encodeURI(searchParams.get('image')) : undefined;
@@ -19,7 +18,11 @@ window.addEventListener('load', function () {
 	const imageLinkElement = getById('image-link');
 	const joinPuzzle = searchParams.get('join');
 	const joinLink = getById('join-link');
-	function setJoinLink(puzzleID) {
+	const errorBox = getById('error');
+	const hostMultiplayerButton = getById('host-multiplayer');
+	let puzzleID = joinPuzzle ? joinPuzzle : null;
+	let rejoining = false;
+	function setJoinLink() {
 		const url = new URL(location.href);
 		url.hash = '';
 		url.search = '?' + new URLSearchParams({
@@ -37,7 +40,7 @@ window.addEventListener('load', function () {
 			joinLink.innerText = prev;
 		}, 3000);
 	});
-	if (joinPuzzle) setJoinLink(joinPuzzle);
+	if (joinPuzzle) setJoinLink();
 	let solved = false;
 	const connectRadius = 10;
 	let pieceZIndexCounter = 1;
@@ -131,6 +134,18 @@ window.addEventListener('load', function () {
 			l[i] = l[j];
 			l[j] = temp;
 		}
+	}
+	let errorTimeout;
+	function showError(e) {
+		console.log(`Error: ${e}`);
+		errorBox.classList.add('no-animation');
+		errorBox.style.opacity = 1;
+		errorBox.innerText = `Error: ${e}`;
+		if (errorTimeout) clearTimeout(errorTimeout);
+		errorTimeout = setTimeout(() => {
+			errorBox.classList.remove('no-animation');
+			errorBox.style.opacity = 0;
+		}, 5000);
 	}
 	const TOP_IN = 0;
 	const TOP_OUT = 1;
@@ -427,8 +442,6 @@ window.addEventListener('load', function () {
 		if (draggingPiece) {
 			let dx = (e.clientX - draggingPieceLastPos.x) / playArea.clientWidth;
 			let dy = (e.clientY - draggingPieceLastPos.y) / playArea.clientHeight;
-			let originalDx = dx;
-			let originalDy = dy;
 			for (const piece of draggingPiece.connectedComponent) {
 				// ensure pieces don't go past left edge
 				dx = Math.max(dx, 0.0001 - piece.x);
@@ -444,12 +457,8 @@ window.addEventListener('load', function () {
 				piece.y += dy;
 				piece.updatePosition();
 			}
-			draggingPieceLastPos.x = e.clientX;
-			draggingPieceLastPos.y = e.clientY;
-			if (dx !== originalDx || dy !== originalDy) {
-				// stop dragging piece if it was dragged past edge
-				stopDraggingPiece();
-			}
+			draggingPieceLastPos.x += dx * playArea.clientWidth;
+			draggingPieceLastPos.y += dy * playArea.clientHeight;
 		}
 	});
 	function loadImage() {
@@ -516,8 +525,7 @@ window.addEventListener('load', function () {
 	async function createPuzzle() {
 		await loadImage();
 		if (isNaN(roughPieceCount) || roughPieceCount < 10 || roughPieceCount > 1000) {
-			// TODO : better error reporting
-			console.error('bad piece count');
+			showError('bad piece count');
 			return;
 		}
 		let bestWidth = 1;
@@ -592,6 +600,10 @@ window.addEventListener('load', function () {
 		}, 100);
 	}
 	async function hostPuzzle() {
+		if (!socket) {
+			openSocket();
+			await new Promise((resolve) => socket.addEventListener('open', () => resolve()));
+		}
 		socket.send(`new ${puzzleWidth} ${puzzleHeight} ${imageUrl};${imageLink} ${puzzleSeed}`);
 		multiplayer = true;
 	}
@@ -645,13 +657,26 @@ window.addEventListener('load', function () {
 			socket.send(new Uint32Array(actions.buffer, 0, i));
 		}
 	}
+	function rejoinPuzzle() {
+		if (rejoining) return;
+		multiplayer = false;
+		rejoining = true;
+		if (socket) {
+			socket.closedByClient = true;
+			socket.close();
+			socket = null;
+		}
+		setTimeout(openSocket, 1000);
+	}
 	let waitingForServerToGiveUsImageUrl = false;
 	let puzzleCreated = null;
 	if (!joinPuzzle && imageUrl.startsWith('http')) {
 		puzzleCreated = createPuzzle();
 	}
-	socket.addEventListener('open', async () => {
-		if (joinPuzzle) {
+	async function onSocketOpen() {
+		if (rejoining) {
+			socket.send(`rejoin ${puzzleID}`);
+		} else if (joinPuzzle) {
 			socket.send(`join ${joinPuzzle}`);
 		} else {
 			if (imageUrl.startsWith('http')) {
@@ -664,15 +689,25 @@ window.addEventListener('load', function () {
 				socket.send('wikimediaPotd');
 				waitingForServerToGiveUsImageUrl = true;
 			} else {
-				// TODO : better error reporting
-				throw new Error("bad image URL");
+				showError("bad image URL");
 			}
 		}
-	});
-	socket.addEventListener('message', async (e) => {
+	}
+	async function onSocketClose(e) {
+		if (e.target.closedByClient)
+			return;
+		if (!multiplayer && !waitingForServerToGiveUsImageUrl) {
+			socket = null;
+			return;
+		}
+		if (rejoining) return;
+		showError('Lost connection to server. Trying to reconnect…');
+		rejoinPuzzle();
+	}
+	async function onSocketMessage(e) {
 		if (typeof e.data === 'string') {
 			if (e.data.startsWith('id: ')) {
-				let puzzleID = e.data.split(' ')[1];
+				puzzleID = e.data.split(' ')[1];
 				sendServerUpdate(); // send piece positions
 				const connectivityUpdate = [0 /* message ID */];
 				for (const piece of pieces) {
@@ -682,7 +717,7 @@ window.addEventListener('load', function () {
 				}
 				socket.send(new Uint32Array(connectivityUpdate));
 				history.pushState({}, null, `?join=${puzzleID}`);
-				setJoinLink(puzzleID);
+				setJoinLink();
 			} else if (e.data.startsWith('ack')) {
 				const messageID = parseInt(e.data.split(' ')[1]);
 				if (messageID === waitingForAck) {
@@ -700,7 +735,11 @@ window.addEventListener('load', function () {
 				getById('host-multiplayer').style.display = 'inline-block';
 			} else if (e.data.startsWith('error ')) {
 				const error = e.data.substring('error '.length);
-				console.error(error); // TODO : better error handling
+				showError(error);
+				rejoinPuzzle();
+			} else if (e.data === 'rejoined') {
+				multiplayer = true;
+				rejoining = false;
 			}
 		} else {
 			const opcode = new Uint8Array(e.data, 0, 1)[0];
@@ -710,7 +749,18 @@ window.addEventListener('load', function () {
 				applyUpdate(e.data);
 			}
 		}
-	});
+	}
+	async function onSocketError() {
+		showError("Couldn't connect to server. You can still play single player with a custom image URL.");
+		multiplayer = false;
+		rejoining = false;
+		hostMultiplayerButton.style.display = imageUrl ? 'inline' : 'none';
+		if (puzzleID) {
+			hostMultiplayerButton.innerText = '👥 Reconnect to multiplayer game';
+		}
+		joinLink.style.display = 'none';
+		socket = null;
+	}
 	const prevPlayAreaSize = Object.preventExtensions({width: playArea.clientWidth, height: playArea.clientHeight});
 	function everyFrame() {
 		if (prevPlayAreaSize.width !== playArea.clientWidth || prevPlayAreaSize.height !== playArea.clientHeight) {
@@ -736,9 +786,13 @@ window.addEventListener('load', function () {
 	getById('piece-size-minus').addEventListener('click', () => {
 		setPieceSize(pieceWidth / 1.2, pieceHeight / 1.2);
 	});
-	getById('host-multiplayer').addEventListener('click', () => {
-		getById('host-multiplayer').style.display = 'none';
-		hostPuzzle();
+	hostMultiplayerButton.addEventListener('click', () => {
+		hostMultiplayerButton.style.display = 'none';
+		if (puzzleID) {
+			rejoinPuzzle();
+		} else {
+			hostPuzzle();
+		}
 	});
 	setInterval(sendServerUpdate, 1000);
 	setInterval(() => {
@@ -747,4 +801,13 @@ window.addEventListener('load', function () {
 		}
 	}, 1000);
 	requestAnimationFrame(everyFrame);
+	function openSocket() {
+		socket = new WebSocket(location.protocol === "file:" || location.hostname === "localhost" ? "ws://localhost:54472" : "wss://jigsaw.pommicket.com");
+		socket.binaryType = "arraybuffer";
+		socket.addEventListener('open', onSocketOpen);
+		socket.addEventListener('close', onSocketClose);
+		socket.addEventListener('error', onSocketError);
+		socket.addEventListener('message', onSocketMessage);
+	}
+	openSocket();
 });

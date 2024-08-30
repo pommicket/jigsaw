@@ -1,2 +1,0 @@
-- single player mode with no server
-- handle server errors on the client side
