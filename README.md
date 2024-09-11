@@ -41,9 +41,10 @@ GRANT CREATE ON SCHEMA public TO jigsaw;
 ```
 
 run `cargo build --release` in the `server` directory
-either on the server or on your computer, and copy `target/release/jigsaw-server` to the jigsaw user's home directory (or any directory they
-have access to).
-now you can run it to start the backend, or create a systemd service to run it for you, e.g.:
+either on the server or on your computer, and copy `featuredpictures.txt potd.py getfeaturedpictures.py  target/release/jigsaw-server`
+to a directory owned by the jigsaw user, e.g. `/home/jigsaw/server`. install python3, and run `getfeaturedpictures.py`
+to get the list of featured pictures (this will take a while).
+now you can run the `jigsaw-server` executable to start the backend, or create a systemd service to run it for you, e.g.:
 
 ```
 [Unit]
