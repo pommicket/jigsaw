@@ -4,7 +4,7 @@ import json
 import time
 from urllib.parse import quote
 
-headers = {'Accept-Encoding':'gzip', 'User-Agent': 'contact pommicket+jigsaw @ gmail.com '}
+headers = {'Accept-Encoding':'gzip', 'User-Agent': 'https://github.com/pommicket/jigsaw  / contact pommicket+jigsaw @ gmail.com '}
 def make_file_request(cmcontinue):
 	URL = 'https://commons.wikimedia.org/w/api.php?action=query&format=json&list=categorymembers&cmlimit=500&cmtitle=Category:Featured_pictures_on_Wikimedia_Commons&cmtype=file&cmprop=title&maxlag=5'
 	while True:

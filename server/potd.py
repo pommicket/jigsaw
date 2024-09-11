@@ -4,7 +4,7 @@ from xml.etree import ElementTree
 from getfeaturedpictures import get_urls_of_images
 from urllib.parse import unquote
 
-headers = {'Accept-Encoding':'gzip', 'User-Agent': 'contact pommicket+jigsaw @ gmail.com '}
+headers = {'Accept-Encoding':'gzip', 'User-Agent': 'https://github.com/pommicket/jigsaw  / contact pommicket+jigsaw @ gmail.com '}
 
 URL = 'https://commons.wikimedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=rss&maxlag=5'
 

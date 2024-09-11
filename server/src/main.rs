@@ -13,6 +13,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, RwLock};
 use tungstenite::protocol::Message;
 
+const PORT: u16 = 54472;
 const PUZZLE_ID_CHARSET: &[u8] = b"23456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
 const PUZZLE_ID_LEN: usize = 7;
 const MAX_PLAYERS: u32 = 20;
@@ -524,12 +525,11 @@ async fn create_table_if_doesnt_exist(database: &tokio_postgres::Client) -> Resu
 
 #[tokio::main]
 async fn main() {
-	let port = 54472;
-	let host_addr = SocketAddr::from(([127, 0, 0, 1], port));
+	let host_addr = SocketAddr::from(([127, 0, 0, 1], PORT));
 	let listener = match tokio::net::TcpListener::bind(host_addr).await {
 		Ok(l) => l,
 		Err(e) => {
-			eprintln!("Couldn't bind to localhost:{port}: {e}");
+			eprintln!("Couldn't bind to localhost:{PORT}: {e}");
 			return;
 		}
 	};

@@ -92,3 +92,7 @@ a, a:visited {
 	color: white;
 	transition: opacity 3s;
 }
+
+footer {
+	font-size: 0.8em;
+}

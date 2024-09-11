@@ -1,5 +1,9 @@
 'use strict';
 window.addEventListener('load', function () {
+	const WEBSOCKET_URL_REMOTE = "wss://jigsaw.pommicket.com";
+	const WEBSOCKET_URL = location.protocol === "file:" || location.hostname === "localhost" ? "ws://localhost:54472" : WEBSOCKET_URL_REMOTE;
+
+
 	const ACTION_MOVE = 3;
 	const ACTION_CONNECT = 4;
 	let socket;
@@ -802,7 +806,7 @@ window.addEventListener('load', function () {
 	}, 1000);
 	requestAnimationFrame(everyFrame);
 	function openSocket() {
-		socket = new WebSocket(location.protocol === "file:" || location.hostname === "localhost" ? "ws://localhost:54472" : "wss://jigsaw.pommicket.com");
+		socket = new WebSocket(WEBSOCKET_URL);
 		socket.binaryType = "arraybuffer";
 		socket.addEventListener('open', onSocketOpen);
 		socket.addEventListener('close', onSocketClose);
