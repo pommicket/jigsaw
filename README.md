@@ -40,28 +40,10 @@ GRANT CREATE ON SCHEMA public TO jigsaw;
 \q
 ```
 
-run `cargo build --release` in the `server` directory
-either on the server or on your computer, and copy `featuredpictures.txt potd.py getfeaturedpictures.py  target/release/jigsaw-server`
-to a directory owned by the jigsaw user, e.g. `/home/jigsaw/server`. install python3, and run `getfeaturedpictures.py`
+copy over the `server` directory to your server and  run `cargo build --release` there. install python3, and run `getfeaturedpictures.py`
 to get the list of featured pictures (this will take a while).
-now you can run the `jigsaw-server` executable to start the backend, or create a systemd service to run it for you, e.g.:
-
-```
-[Unit]
-Description=Jigsaw puzzle server
-After=network.target
-
-[Service]
-User=jigsaw
-WorkingDirectory=/home/jigsaw/server
-ExecStart=/home/jigsaw/server/jigsaw-server
-Type=simple
-Restart=always
-
-[Install]
-WantedBy=default.target
-RequiredBy=network.target
-```
+now you can run the `target/release/jigsaw-server` executable to start the backend, or create a systemd service to run it for you, e.g. as in
+the jigsaw-server.service file.
 
 now for the front-end, first change the `WEBSOCKET_URL_REMOTE` constant in `game.js` to a subdomain of your domain.
 run a proxy on your server to forward websocket traffic from that subdomain to port 54472 (this port can be configured in `server/src/main.rs`).

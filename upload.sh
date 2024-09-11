@@ -14,14 +14,24 @@ done
 # if static-only argument is given, exit now
 printf '%s' "$@" | grep -q 'static-only' && exit 0
 
-cd server
+echo 'Copying over server files…'
+tar czf server.tar.gz $(git ls-files server) || exit 1
+scp server.tar.gz $REMOTE: || exit 1
+rm server.tar.gz
+ssh $REMOTE <<EOF
+
+cd
+tar xf server.tar.gz || exit 1
+rm server.tar.gz
+echo 'Updating rust…'
+rustup update stable
+cd server/src
 echo 'Building server…'
 cargo build --release || exit 1
-echo 'Stopping server…'
-ssh $REMOTE sudo systemctl stop jigsaw-server.service  || exit 1
-echo 'Copying server files…'
-scp -C featuredpictures.txt potd.py getfeaturedpictures.py  target/release/jigsaw-server ${REMOTE}:server/  || exit 1
 echo 'Restarting server…'
-ssh $REMOTE sudo systemctl start jigsaw-server.service || exit 1
+sudo systemctl restart jigsaw-server.service || exit 1
+
+EOF
+
 cd ..
 echo 'Done!'
